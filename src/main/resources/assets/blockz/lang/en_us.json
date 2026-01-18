@@ -1,0 +1,17 @@
+{
+  "screen.blockz.dayz": "DayZ Inventory",
+  "screen.blockz.filter": "Filter",
+  "screen.blockz.loot": "LOOT",
+  "screen.blockz.equipment": "EQUIPMENT",
+  "screen.blockz.equip_upper": "Upper Body",
+  "screen.blockz.equip_offhand": "Offhand",
+  "screen.blockz.pockets": "Pockets",
+  "key.blockz.open_dayz": "Toggle DayZ Inventory",
+  "msg.blockz.dayz_enabled": "DayZ Inventory Enabled",
+  "msg.blockz.dayz_disabled": "DayZ Inventory Disabled",
+  "screen.blockz.hands": "HANDS",
+  "item.blockz.small_backpack": "Small Backpack",
+  "item.blockz.medium_backpack": "Medium Backpack",
+  "item.blockz.large_backpack": "Large Backpack",
+  "creativetab.blockz_tab": "BlockZ"
+}

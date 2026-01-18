@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "blockz:small_backpack",
+    "blockz:medium_backpack",
+    "blockz:large_backpack"
+  ]
+}

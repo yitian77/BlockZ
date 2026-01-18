@@ -1,0 +1,17 @@
+{
+  "screen.blockz.dayz": "DayZ物品栏",
+  "screen.blockz.filter": "筛选",
+  "screen.blockz.loot": "LOOT",
+  "screen.blockz.equipment": "EQUIPMENT",
+  "screen.blockz.equip_upper": "上半身装备",
+  "screen.blockz.equip_offhand": "副手",
+  "screen.blockz.pockets": "口袋",
+  "key.blockz.open_dayz": "DayZ界面开关",
+  "msg.blockz.dayz_enabled": "DayZ物品界面已启用",
+  "msg.blockz.dayz_disabled": "DayZ物品界面已禁用",
+  "screen.blockz.hands": "HANDS",
+  "item.blockz.small_backpack": "小背包",
+  "item.blockz.medium_backpack": "中背包",
+  "item.blockz.large_backpack": "大背包",
+  "creativetab.blockz_tab": "BlockZ"
+}
