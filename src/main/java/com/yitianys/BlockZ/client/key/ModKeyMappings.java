@@ -2,6 +2,8 @@ package com.yitianys.BlockZ.client.key;
 
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.client.ClientSettings;
+import com.yitianys.BlockZ.network.DayzToggleRequestC2S;
+import com.yitianys.BlockZ.network.NetworkHandler;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -15,10 +17,13 @@ import org.lwjgl.glfw.GLFW;
 @Mod.EventBusSubscriber(modid = BlockZ.MODID, value = Dist.CLIENT)
 public class ModKeyMappings {
     public static KeyMapping OPEN_DAYZ;
+    public static KeyMapping ROTATE_ITEM;
 
     public static void register(RegisterKeyMappingsEvent event) {
         OPEN_DAYZ = new KeyMapping("key.blockz.open_dayz", GLFW.GLFW_KEY_I, "key.categories.inventory");
+        ROTATE_ITEM = new KeyMapping("key.blockz.rotate_item", GLFW.GLFW_KEY_SPACE, "key.categories.inventory");
         event.register(OPEN_DAYZ);
+        event.register(ROTATE_ITEM);
     }
 
     @SubscribeEvent
@@ -26,8 +31,12 @@ public class ModKeyMappings {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         if (OPEN_DAYZ != null && OPEN_DAYZ.consumeClick()) {
-            ClientSettings.dayzEnabled = !ClientSettings.dayzEnabled;
-            mc.player.sendSystemMessage(Component.translatable(ClientSettings.dayzEnabled ? "msg.blockz.dayz_enabled" : "msg.blockz.dayz_disabled"));
+            if (!ClientSettings.dayzToggleAllowed) {
+                mc.player.sendSystemMessage(Component.translatable("msg.blockz.dayz_toggle_denied"));
+                return;
+            }
+            BlockZ.LOGGER.info("Toggling DayZ UI. Current state: {}. Sending: {}", ClientSettings.dayzEnabled, !ClientSettings.dayzEnabled);
+            NetworkHandler.CHANNEL.sendToServer(new DayzToggleRequestC2S(!ClientSettings.dayzEnabled));
         }
     }
 }

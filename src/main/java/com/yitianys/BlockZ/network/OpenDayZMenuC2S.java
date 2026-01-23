@@ -4,8 +4,7 @@ import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.MenuProvider;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.SimpleMenuProvider;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkHooks;
 
@@ -19,17 +18,15 @@ public class OpenDayZMenuC2S {
         ctx.enqueueWork(() -> {
             ServerPlayer player = ctx.getSender();
             if (player == null) return;
-            MenuProvider provider = new MenuProvider() {
-                @Override
-                public Component getDisplayName() {
-                    return Component.translatable("screen.blockz.dayz");
-                }
-                @Override
-                public net.minecraft.world.inventory.AbstractContainerMenu createMenu(int id, net.minecraft.world.entity.player.Inventory inv, Player p) {
-                    return new DayZInventoryMenu(id, inv);
-                }
-            };
-            NetworkHooks.openScreen(player, provider);
+
+            com.yitianys.BlockZ.BlockZ.LOGGER.info("Opening DayZ Inventory for player: " + player.getName().getString());
+
+            NetworkHooks.openScreen(player, new SimpleMenuProvider(
+                (id, inv, p) -> new DayZInventoryMenu(id, inv),
+                Component.translatable("screen.blockz.dayz")
+            ), buf -> {
+                buf.writeBoolean(false); // 不是通过容器打开的
+            });
         });
         ctx.setPacketHandled(true);
     }
