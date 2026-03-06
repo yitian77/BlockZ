@@ -1,652 +1,980 @@
 package com.yitianys.BlockZ.client.gui;
 
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.datafixers.util.Pair;
+import com.yitianys.BlockZ.client.ClientSettings;
 import com.yitianys.BlockZ.client.key.ModKeyMappings;
+import com.yitianys.BlockZ.entity.CorpseEntity;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
+import com.yitianys.BlockZ.menu.slot.TetrisSlot;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.RotateItemC2S;
+import com.yitianys.BlockZ.util.ItemSizeManager;
+import java.lang.reflect.Field;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
-import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.util.Mth;
+import net.minecraft.world.Container;
+import net.minecraft.world.Nameable;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.items.IItemHandler;
-import com.yitianys.BlockZ.util.ItemSizeManager;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 
 public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMenu> {
+   private float scrollOffs;
+   private boolean isScrolling;
+   private float vicinityScrollOffs;
+   private boolean isVicinityScrolling;
+   private boolean clickStartedInVicinitySlot;
+   private static final int VIEW_HEIGHT = 188;
+   private static final ResourceLocation LOCK_ICON = new ResourceLocation("blockz", "textures/gui/inventory/lock.png");
+   private static Field SLOT_X_FIELD;
+   private static Field SLOT_Y_FIELD;
 
-    private float scrollOffs;
-    private boolean isScrolling;
-    // Viewport Height: Panel Height (232) - Header (~20) - Footer (~12) = ~200.
-    // Let's check UIConstants.INVENTORY_SLOTS_Y (40?) + Viewport
-    // Assuming UIConstants.PANEL_H is around 232.
-    // If INVENTORY_SLOTS_Y is 40, and we want to stop before HOTBAR_Y (208).
-    // 208 - 40 = 168 pixels visible.
-    private static final int VIEW_HEIGHT = 168;
-    private static final ResourceLocation LOCK_ICON = ResourceLocation.fromNamespaceAndPath("blockz", "textures/gui/inventory/lock.png");
+   public DayZInventoryScreen(DayZInventoryMenu menu, Inventory inv, Component title) {
+      super(menu, inv, title);
+      this.imageWidth = UIConstants.WIDTH;
+      this.imageHeight = 200;
+   }
 
-    public DayZInventoryScreen(DayZInventoryMenu menu, Inventory inv, Component title) {
-        super(menu, inv, title);
-        this.imageWidth = UIConstants.GUI_WIDTH;
-        this.imageHeight = UIConstants.GUI_HEIGHT;
-    }
+   protected void init() {
+      super.init();
+      this.updateDynamicLayout();
+   }
 
-    @Override
-    protected void init() {
-        super.init();
-        // 计算居中偏移，使 UIConstants 中的坐标相对于屏幕居中
-        this.leftPos = (this.width - UIConstants.WIDTH) / 2;
-        this.topPos = (this.height - UIConstants.HEIGHT) / 2;
-    }
-
-    @Override
-    protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
-        int x = this.leftPos;
-        int y = this.topPos;
-
-        // 1. Vicinity Panel / Container Panel
-        net.minecraft.world.Container activeContainer = this.menu.getActiveContainer();
-        String vicinityTitle = "VICINITY";
-        if (activeContainer instanceof net.minecraft.world.Nameable nameable && nameable.hasCustomName()) {
-            vicinityTitle = nameable.getDisplayName().getString();
-        } else if (activeContainer != null) {
-             if (activeContainer instanceof net.minecraft.world.Nameable nameable) {
-                 vicinityTitle = nameable.getDisplayName().getString().toUpperCase();
-             } else {
-                 vicinityTitle = "CONTAINER";
-             }
-        }
-        drawPanel(graphics, x + UIConstants.VICINITY_X, y + UIConstants.PANEL_Y, UIConstants.PANEL_W, UIConstants.PANEL_H, vicinityTitle);
-        
-        // 2. Player Panel (Central Upper)
-        int playerPanelH = UIConstants.PANEL_H - UIConstants.HOTBAR_H - 2;
-        drawPanel(graphics, x + UIConstants.PLAYER_X, y + UIConstants.PANEL_Y, UIConstants.PANEL_W, playerPanelH, "PLAYER");
-        
-        // Use defined constant for Player Model position to avoid overlap with Crafting
-        renderPlayerInInventory(graphics, x + UIConstants.PLAYER_MODEL_X, y + UIConstants.PLAYER_MODEL_Y, mouseX, mouseY);
-
-        // 3. Hotbar Panel (Central Lower)
-        drawPanel(graphics, x + UIConstants.HOTBAR_X, y + UIConstants.HOTBAR_Y, UIConstants.HOTBAR_W, UIConstants.HOTBAR_H, "HOTBAR");
-
-        // 4. Inventory Panel
-        drawPanel(graphics, x + UIConstants.INVENTORY_X, y + UIConstants.PANEL_Y, UIConstants.PANEL_W, UIConstants.PANEL_H, "INVENTORY");
-        
-        boolean hasBackpack = this.menu.hasBackpack();
-        int backpackCapacity = this.menu.getBackpackCapacity();
-        
-        // 渲染所有槽位背景 (仅渲染激活的)
-        // Vicinity: 0-29
-        // Equipment: 30-38
-        // Inventory: 39-88 (39-43 Pockets, 44-88 Backpack/Vest)
-        // Hotbar: 89-97
-        // Crafting: 98 (Result), 99-102 (Input)
-        renderSlotRangeBackground(graphics, 0, 102);
-
-        // 5. Crafting Label
-        graphics.drawString(this.font, "CRAFTING", x + UIConstants.CRAFTING_X, y + UIConstants.CRAFTING_Y - 10, 0xFFDDDDDD, false);
-
-        // Render Capacity Tooltips for Equipment
-        renderEquipmentCapacity(graphics, mouseX, mouseY, 35, this.menu.backpackCapacity); // Backpack
-        renderEquipmentCapacity(graphics, mouseX, mouseY, 36, this.menu.vestCapacity);     // Vest
-        renderEquipmentCapacity(graphics, mouseX, mouseY, 31, this.menu.shirtCapacity);    // Shirt
-        renderEquipmentCapacity(graphics, mouseX, mouseY, 32, this.menu.pantsCapacity);    // Pants
-
-        if (!hasBackpack && this.menu.vestCapacity == 0 && this.menu.shirtCapacity == 0 && this.menu.pantsCapacity == 0) {
-            // 提示玩家需要存储空间
-            graphics.drawString(this.font, "NEED STORAGE", x + UIConstants.INVENTORY_X + 10, y + UIConstants.PANEL_Y + 40, 0x40FFFFFF, false);
-        }
-        
-        // 渲染图标
-        renderSlotIcons(graphics);
-
-        renderTetrisFootprints(graphics);
-    }
-
-    private void renderEquipmentCapacity(GuiGraphics graphics, int mouseX, int mouseY, int slotIndex, int capacity) {
-        if (capacity <= 0) return;
-        if (slotIndex >= this.menu.slots.size()) return;
-
-        Slot slot = this.menu.slots.get(slotIndex);
-        if (isHovering(slot.x, slot.y, 16, 16, mouseX, mouseY)) {
-            String capStr = String.format("CAPACITY: %d", capacity);
-            // Draw text above the slot (centered horizontally relative to slot if possible, or fixed offset)
-            // Original offset: leftPos + bpSlot.x - 20, topPos + bpSlot.y - 10
-            int textX = this.leftPos + slot.x - 20; 
-            int textY = this.topPos + slot.y - 10;
-            
-            // Draw text with yellow color
-            graphics.drawString(this.font, capStr, textX, textY, 0xFFFFFF00, true);
-            
-            // Draw yellow outline around the slot
-            graphics.renderOutline(this.leftPos + slot.x - 1, this.topPos + slot.y - 1, 18, 18, 0xFFFFFF00);
-        }
-    }
-
-    private void renderSlotRangeBackground(GuiGraphics graphics, int start, int end) {
-        for (int i = start; i <= end && i < this.menu.slots.size(); i++) {
-            Slot slot = this.menu.slots.get(i);
-            if (slot.isActive()) {
-                int slotX = this.leftPos + slot.x - 1;
-                int slotY = this.topPos + slot.y - 1;
-                // Dimmer background for empty slots, standard for occupied
-                int bgColor = slot.hasItem() ? 0x30FFFFFF : 0x10FFFFFF; 
-                graphics.fill(slotX, slotY, slotX + 18, slotY + 18, bgColor);
-                
-                // Dimmer outline for empty slots, Brighter for occupied
-                // User requested "Occupied grid border more visible, not inventory border"
-                int outlineColor = slot.hasItem() ? 0x60FFFFFF : 0x20FFFFFF;
-                graphics.renderOutline(slotX, slotY, 18, 18, outlineColor);
+   protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
+      this.updateDynamicLayout();
+      int x = this.leftPos;
+      int y = this.topPos;
+      Container activeContainer = ((DayZInventoryMenu)this.menu).getActiveContainer();
+      String vicinityTitle = "VICINITY";
+      if (activeContainer instanceof CorpseEntity) {
+         CorpseEntity corpse = (CorpseEntity)activeContainer;
+         String ownerName = corpse.getOwnerName();
+         vicinityTitle = ownerName != null && !ownerName.isBlank() ? ownerName.toUpperCase() : "CORPSE";
+      } else {
+         label52: {
+            if (activeContainer instanceof Nameable) {
+               Nameable nameable = (Nameable)activeContainer;
+               if (nameable.hasCustomName()) {
+                  vicinityTitle = nameable.getDisplayName().getString();
+                  break label52;
+               }
             }
-        }
-    }
 
-    @Override
-    protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
-        // Do not call super.renderLabels to avoid default title rendering
-        
-        int x = UIConstants.INVENTORY_SLOTS_X;
-        int totalContentHeight = this.menu.totalContentHeight;
-        int maxScroll = Math.max(0, totalContentHeight - VIEW_HEIGHT);
-        int scrollPixels = (int) (this.scrollOffs * maxScroll);
-        
-        int guiMinY = UIConstants.INVENTORY_SLOTS_Y;
-        int guiMaxY = guiMinY + VIEW_HEIGHT;
+            if (activeContainer != null) {
+               if (this.title != null && !this.title.getString().equals("DayZ Inventory") && !this.title.getString().equals("screen.blockz.dayz")) {
+                  vicinityTitle = this.title.getString();
+               } else if (activeContainer instanceof Nameable) {
+                  Nameable nameable = (Nameable)activeContainer;
+                  vicinityTitle = nameable.getDisplayName().getString().toUpperCase();
+               } else {
+                  vicinityTitle = "CONTAINER";
+               }
+            }
+         }
+      }
 
-        renderSectionLabel(graphics, net.minecraft.network.chat.Component.translatable("screen.blockz.pockets"), x, this.menu.pocketsY, scrollPixels, guiMinY, guiMaxY);
-        renderSectionLabel(graphics, net.minecraft.network.chat.Component.translatable("screen.blockz.backpack"), x, this.menu.backpackY, scrollPixels, guiMinY, guiMaxY);
-        renderSectionLabel(graphics, net.minecraft.network.chat.Component.translatable("screen.blockz.vest"), x, this.menu.vestY, scrollPixels, guiMinY, guiMaxY);
-        renderSectionLabel(graphics, net.minecraft.network.chat.Component.translatable("screen.blockz.shirt_pocket"), x, this.menu.shirtY, scrollPixels, guiMinY, guiMaxY);
-        renderSectionLabel(graphics, net.minecraft.network.chat.Component.translatable("screen.blockz.pants_pocket"), x, this.menu.pantsY, scrollPixels, guiMinY, guiMaxY);
+      int vicinityWidth = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+      int vicOffset = ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+      int vicPanelX = 0 + vicOffset;
+      this.drawPanel(graphics, x + vicPanelX, y + 0, vicinityWidth, 200, vicinityTitle);
+      int pocketCount;
+      int pocketRows;
+      int pocketsHeight;
+      if (((DayZInventoryMenu)this.menu).supportsContainerPaging()) {
+         int pageCount = ((DayZInventoryMenu)this.menu).getContainerPageCount();
+         int page = ((DayZInventoryMenu)this.menu).getContainerPage() + 1;
+         String pageText = page + "/" + pageCount;
+         int pageY = y + 0 - 10;
+         int rightArrowX = x + vicPanelX + vicinityWidth - 12;
+         int leftArrowX = rightArrowX - 12;
+         int pageTextX = leftArrowX - 6 - this.font.width(pageText);
+         graphics.drawString(this.font, "<", leftArrowX, pageY, -2236963, false);
+         graphics.drawString(this.font, pageText, pageTextX, pageY, -2236963, false);
+         graphics.drawString(this.font, ">", rightArrowX, pageY, -2236963, false);
+      }
 
-        // Render Scrollbar
-        if (maxScroll > 0) {
-            int scrollX = UIConstants.INVENTORY_X + UIConstants.PANEL_W - 14;
-            int scrollY = UIConstants.INVENTORY_SLOTS_Y;
-            int scrollH = VIEW_HEIGHT;
-
-            graphics.fill(scrollX, scrollY, scrollX + 8, scrollY + scrollH, 0x20000000);
-            
-            int thumbH = Math.max(10, (int)(scrollH * (VIEW_HEIGHT / (float)totalContentHeight)));
-            int thumbTrackH = scrollH - thumbH;
-            int thumbY = scrollY + (int)(this.scrollOffs * thumbTrackH);
-            
-            graphics.fill(scrollX + 1, thumbY, scrollX + 7, thumbY + thumbH, 0xFF888888);
-            graphics.fill(scrollX + 1, thumbY, scrollX + 6, thumbY + thumbH - 1, 0xFFCCCCCC);
-            graphics.fill(scrollX + 2, thumbY + 1, scrollX + 7, thumbY + thumbH, 0xFF555555);
-            graphics.fill(scrollX + 2, thumbY + 1, scrollX + 6, thumbY + thumbH - 1, 0xFFAAAAAA);
-        }
-    }
-
-    private void renderSectionLabel(GuiGraphics graphics, net.minecraft.network.chat.Component text, int x, int baseY, int scrollPixels, int minY, int maxY) {
-        if (baseY < -500) return; // Hidden section (using threshold because init is -1000)
-        
-        int y = baseY - 12 - scrollPixels;
-        
-        // Simple visibility check
-        if (y + 8 > minY && y < maxY) {
-            // Draw text with shadow
-            graphics.drawString(this.font, text, x, y, 0xFFAAAAAA, true);
-        }
-    }
-
-    private void renderLockedSlots(GuiGraphics graphics) {
-        if (com.yitianys.BlockZ.client.ClientSettings.dayzEnabled || this.minecraft.player.hasPermissions(2)) {
-            return;
-        }
-
-        graphics.pose().pushPose();
-        graphics.pose().translate(0, 0, 300); // 确保在物品之上
-
-        // Render lock icon over extra Inventory Slots 44-88 when DayZ UI is disabled
-        // Pockets (39-43) are standard vanilla slots and remain unlocked
-        for (int i = 44; i <= 88; i++) {
-            if (i >= this.menu.slots.size()) break;
-            Slot slot = this.menu.slots.get(i);
-            
-            // 只有当槽位在屏幕范围内且激活时才渲染
-            if (slot.y < -2000 || !slot.isActive()) continue;
-
-            int x = this.leftPos + slot.x;
-            int y = this.topPos + slot.y;
-
-            // 绘制半透明黑色遮罩
-            graphics.fill(x, y, x + 16, y + 16, 0x80000000);
-            
-            // 绘制锁图标
+      int playerPanelH = 153;
+      this.drawPanel(graphics, x + 172, y + 0, 96, playerPanelH, "PLAYER");
+      this.renderPlayerInInventory(graphics, x + 220, y + 75, mouseX, mouseY);
+      this.drawPanel(graphics, x + 172, y + 155, 96, 45, "HOTBAR");
+      int invPanelW = this.getInventoryPanelWidth();
+      this.drawPanel(graphics, x + 270, y + 0, invPanelW, 200, "INVENTORY");
+      boolean hasBackpack = ((DayZInventoryMenu)this.menu).hasBackpack();
+      this.renderSlotRangeBackground(graphics, 0, ((DayZInventoryMenu)this.menu).slots.size() - 1);
+      if (((DayZInventoryMenu)this.menu).isLockedMode) {
+         pocketCount = ((DayZInventoryMenu)this.menu).getPocketCount();
+         pocketRows = (pocketCount + 5 - 1) / 5;
+         pocketsHeight = pocketRows * 18;
+         int overlayStartY = y + 10 + pocketsHeight + 2;
+         int lockX = x + 270 + invPanelW / 2 - 8;
+         int lockY = overlayStartY + 20;
+         int overlayEndY = y + 0 + 200 - 2;
+         if (overlayStartY < overlayEndY) {
+            graphics.fill(x + 270 + 2, overlayStartY, x + 270 + invPanelW - 2, overlayEndY, 1610612736);
             RenderSystem.setShaderTexture(0, LOCK_ICON);
-            RenderSystem.enableBlend();
-            graphics.blit(LOCK_ICON, x, y, 0, 0, 16, 16, 16, 16);
-        }
-        
-        graphics.pose().popPose();
-    }
+            graphics.blit(LOCK_ICON, lockX, lockY, 0.0F, 0.0F, 16, 16, 16, 16);
+            graphics.drawCenteredString(this.font, "LOCKED", lockX + 8, lockY + 20, -5592406);
+         }
+      }
 
-    private void renderPlayerInInventory(GuiGraphics graphics, int x, int y, int mouseX, int mouseY) {
-        if (this.minecraft.player == null) return;
-        
-        // 使用 graphics.pose() 获取 PoseStack
-        graphics.pose().pushPose();
-        
-        // 渲染玩家实体 (Scale reduced from 42 to 32 as requested: 0.75x)
-        InventoryScreen.renderEntityInInventoryFollowsMouse(graphics, x, y, 32, (float)x - mouseX, (float)y - 50 - mouseY, this.minecraft.player);
-        
-        graphics.pose().popPose();
-    }
+      graphics.drawString(this.font, "CRAFTING", x + 198, y + 115 - 10, -2236963, false);
+      int vStart = 81;
+      this.renderEquipmentCapacity(graphics, mouseX, mouseY, vStart + 5, ((DayZInventoryMenu)this.menu).backpackCapacity);
+      this.renderEquipmentCapacity(graphics, mouseX, mouseY, vStart + 6, ((DayZInventoryMenu)this.menu).vestCapacity);
+      this.renderEquipmentCapacity(graphics, mouseX, mouseY, vStart + 1, ((DayZInventoryMenu)this.menu).shirtCapacity);
+      this.renderEquipmentCapacity(graphics, mouseX, mouseY, vStart + 2, ((DayZInventoryMenu)this.menu).pantsCapacity);
+      if (!hasBackpack && ((DayZInventoryMenu)this.menu).vestCapacity == 0 && ((DayZInventoryMenu)this.menu).shirtCapacity == 0 && ((DayZInventoryMenu)this.menu).pantsCapacity == 0) {
+         pocketCount = ((DayZInventoryMenu)this.menu).getPocketCount();
+         pocketRows = (pocketCount + 5 - 1) / 5;
+         pocketsHeight = pocketRows * 18;
+         int textY = y + 10 + pocketsHeight + 20;
+         graphics.drawCenteredString(this.font, "NEED STORAGE", x + 270 + invPanelW / 2, textY, 1090519039);
+      }
 
-    private void renderSlotIcons(GuiGraphics graphics) {
-        for (int slotId = 0; slotId < this.menu.slots.size(); slotId++) {
-            Slot slot = this.menu.slots.get(slotId);
-            if (!slot.isActive() || slot.hasItem()) continue;
+      this.renderSlotIcons(graphics);
+      this.renderTetrisFootprints(graphics);
+   }
 
-            int slotX = this.leftPos + slot.x;
-            int slotY = this.topPos + slot.y;
+   private void renderEquipmentCapacity(GuiGraphics graphics, int mouseX, int mouseY, int slotIndex, int capacity) {
+      if (capacity > 0) {
+         if (slotIndex < ((DayZInventoryMenu)this.menu).slots.size()) {
+            Slot slot = (Slot)((DayZInventoryMenu)this.menu).slots.get(slotIndex);
+            if (this.isHovering(slot.x, slot.y, 16, 16, (double)mouseX, (double)mouseY)) {
+               String capStr = String.format("CAPACITY: %d", capacity);
+               int textX = this.leftPos + slot.x - 20;
+               int textY = this.topPos + slot.y - 10;
+               graphics.drawString(this.font, capStr, textX, textY, -256, true);
+               graphics.renderOutline(this.leftPos + slot.x - 1, this.topPos + slot.y - 1, 18, 18, -256);
+            }
 
-            ResourceLocation icon = getSlotIcon(slotId);
-            if (icon == null) continue;
+         }
+      }
+   }
 
-            RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 0.4F);
-            graphics.blit(icon, slotX, slotY, 0, 0, 16, 16, 16, 16);
-            RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-        }
-    }
+   private void updateSlotScroll(int slotIndex, int scrollPixels, int guiMinY, int guiMaxY) {
+      this.updateSlotScroll(slotIndex, scrollPixels, guiMinY, guiMaxY, false);
+   }
 
-    private ResourceLocation getSlotIcon(int slotId) {
-        // 索引重算 (DayZ 布局):
-        // Vicinity: 0-29
-        // 30: Headgear
-        // 31: Shirt
-        // 32: Pants
-        // 33: Shoes
-        // 34: Offhand
-        // 35: Backpack
-        // 36: Vest
-        // 37: Gloves
-        // 38: Mask
+   private void renderSlotRangeBackground(GuiGraphics graphics, int start, int end) {
+      int vicMinY = this.topPos + 10 - 1;
+      int vicH = 188;
+      int invMinY = this.topPos + 10 - 1;
+      int invH = 188;
 
-        if (slotId >= 0 && slotId <= 29) return null;
-
-        if (slotId == 30) return UITextures.SLOT_HEADGEAR;
-        if (slotId == 31) return UITextures.SLOT_SHIRT;
-        if (slotId == 32) return UITextures.SLOT_PANTS;
-        if (slotId == 33) return UITextures.SLOT_SHOES;
-        if (slotId == 34) return UITextures.SLOT_OFFHAND;
-        if (slotId == 35) return UITextures.SLOT_BACKPACK;
-        if (slotId == 36) return UITextures.SLOT_VEST;
-        if (slotId == 37) return UITextures.SLOT_GLOVES;
-        if (slotId == 38) return UITextures.SLOT_MASK;
-
-        return null;
-    }
-
-    private void drawPanel(GuiGraphics graphics, int x, int y, int w, int h, String title) {
-        // 仿 DayM 风格面板
-        graphics.fill(x, y, x + w, y + h, 0xB0000000); // 加深背景不透明度，提高对比度
-        graphics.fill(x, y - 1, x + w, y, 0xFF555555); // 上边框 (细线)
-        graphics.fill(x, y + h, x + w, y + h + 1, 0xFF555555); // 下边框
-        graphics.fill(x - 1, y, x, y + h, 0xFF555555); // 左边框
-        graphics.fill(x + w, y, x + w + 1, y + h, 0xFF555555); // 右边框
-
-        // 标题栏
-        graphics.fill(x, y - 12, x + w, y, 0xCC000000);
-        // 标题文字 - 使用小字体效果或调整颜色
-        graphics.drawString(this.font, title, x + 4, y - 10, 0xFFDDDDDD, false);
-    }
-
-    private void renderTetrisFootprints(GuiGraphics graphics) {
-        // 1. Render for Inventory Sections (Backpack/Vest 44-88)
-        // Vicinity (0-29) and Pockets (39-43) are regular slots and should not show footprints
-        // because they don't use the Tetris grid system for occupancy.
-        int scissorX = this.leftPos + UIConstants.INVENTORY_X;
-        int scissorY = this.topPos + UIConstants.INVENTORY_SLOTS_Y - 1;
-        int scissorW = UIConstants.PANEL_W;
-        int scissorH = VIEW_HEIGHT + 2;
-
-        graphics.enableScissor(scissorX, scissorY, scissorX + scissorW, scissorY + scissorH);
-        renderFootprintsForRange(graphics, 44, 88, UIConstants.INVENTORY_COLS, true);
-        graphics.disableScissor();
-    }
-
-    private void renderFootprintsForRange(GuiGraphics graphics, int startIdx, int endIdx, int cols, boolean isInventory) {
-        for (int i = startIdx; i <= endIdx; i++) {
-            if (i >= this.menu.slots.size()) break;
-            Slot slot = this.menu.slots.get(i);
-            if (!slot.hasItem()) continue;
-
-            ItemStack stack = slot.getItem();
-            ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
-            if (size.width() <= 1 && size.height() <= 1) continue;
-
-            // Only render if this is the anchor slot for a multi-slot item
-            // or if it's a TetrisSlot and we want to show its extent
+      for(int i = start; i <= end && i < ((DayZInventoryMenu)this.menu).slots.size(); ++i) {
+         Slot slot = (Slot)((DayZInventoryMenu)this.menu).slots.get(i);
+         if (slot.isActive()) {
             int slotX = this.leftPos + slot.x - 1;
             int slotY = this.topPos + slot.y - 1;
-            int pixelW = size.width() * UIConstants.SLOT_PITCH;
-            int pixelH = size.height() * UIConstants.SLOT_PITCH;
+            boolean isScissored = false;
+            int sY;
+            int outlineColor;
+            int sH;
+            if (i >= 0 && i < 81 || ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() >= 0 && i >= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() && i <= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotEnd()) {
+               sY = Math.max(slotY, vicMinY);
+               outlineColor = Math.min(slotY + 18, vicMinY + vicH);
+               sH = outlineColor - sY;
+               if (sH <= 0) {
+                  continue;
+               }
 
-            // Draw footprint background
-            graphics.fill(slotX + 1, slotY + 1, slotX + pixelW - 1, slotY + pixelH - 1, 0x60FFFFAA);
-            graphics.renderOutline(slotX, slotY, pixelW, pixelH, 0xA0FFFFAA);
-        }
-    }
+               this.enableScissor(slotX, sY, 18, sH);
+               isScissored = true;
+            } else if (i >= 90 && i <= ((DayZInventoryMenu)this.menu).getBackpackSlotEnd()) {
+               sY = Math.max(slotY, invMinY);
+               outlineColor = Math.min(slotY + 18, invMinY + invH);
+               sH = outlineColor - sY;
+               if (sH <= 0) {
+                  continue;
+               }
 
-    @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(graphics);
-        super.render(graphics, mouseX, mouseY, partialTick);
+               this.enableScissor(slotX, sY, 18, sH);
+               isScissored = true;
+            }
 
-        // 渲染拿起物品的占格预览
-        renderCarriedItemPreview(graphics, mouseX, mouseY);
-        
-        // 渲染悬停物品的名称 (DayZ 风格)
-        if (this.hoveredSlot != null && this.hoveredSlot.hasItem() && this.menu.getCarried().isEmpty()) {
-            ItemStack stack = this.hoveredSlot.getItem();
-            String name = stack.getHoverName().getString();
-            graphics.drawString(this.font, name, mouseX + 12, mouseY - 12, 0xFFFFFFFF, true);
-        }
+            sY = slot.hasItem() ? 822083583 : 285212671;
+            graphics.fill(slotX, slotY, slotX + 18, slotY + 18, sY);
+            outlineColor = slot.hasItem() ? 1627389951 : 553648127;
+            graphics.renderOutline(slotX, slotY, 18, 18, outlineColor);
+            if (isScissored) {
+               RenderSystem.disableScissor();
+            }
+         }
+      }
 
-        if (this.menu.isEnchantingTable) {
-            renderEnchantingInfo(graphics, mouseX, mouseY);
-        }
-        
-        // 渲染锁图标 (在物品之上)
-        renderLockedSlots(graphics);
-        
-        this.renderTooltip(graphics, mouseX, mouseY);
-    }
+   }
 
-    private void renderCarriedItemPreview(GuiGraphics graphics, int mouseX, int mouseY) {
-        ItemStack carried = this.menu.getCarried();
-        if (carried.isEmpty() || this.hoveredSlot == null) return;
+   public boolean renderCustomSlot(GuiGraphics guiGraphics, Slot slot, Slot clickedSlot, ItemStack draggingItem) {
+      if (!(slot instanceof TetrisSlot)) {
+         return false;
+      } else {
+         int vicMinY = this.topPos + 10 - 1;
+         int invMinY = this.topPos + 10 - 1;
+         int viewportY = -1;
+         int viewportH = 188;
+         if (slot.index >= 90 && slot.index <= ((DayZInventoryMenu)this.menu).getBackpackSlotEnd()) {
+            viewportY = invMinY;
+         } else if (slot.index >= 0 && slot.index < 81 || ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() >= 0 && slot.index >= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() && slot.index <= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotEnd()) {
+            viewportY = vicMinY;
+         }
 
-        ItemSizeManager.ItemSize size = ItemSizeManager.getSize(carried);
-        int w = size.width();
-        int h = size.height();
+         ItemStack stack = slot.getItem();
+         boolean hasItem = !stack.isEmpty();
+         ItemSizeManager.ItemSize size = hasItem ? ItemSizeManager.getSize(stack) : new ItemSizeManager.ItemSize(1, 1);
+         boolean isMultiSlot = size.width() > 1 || size.height() > 1;
+         if (!hasItem && slot.getNoItemIcon() == null) {
+            return true;
+         } else {
+            int areaWidth = size.width() * 18;
+            int areaHeight = size.height() * 18;
+            int scX = this.leftPos + slot.x - 1;
+            int scY = this.topPos + slot.y - 1;
+            int scH = areaHeight;
+            if (viewportY != -1) {
+               int viewportBottom = viewportY + viewportH;
+               int newScY = Math.max(scY, viewportY);
+               int newBottom = Math.min(scY + areaHeight, viewportBottom);
+               int newScH = newBottom - newScY;
+               if (newScH <= 0) {
+                  return true;
+               }
 
-        // Determine if it fits
-        boolean fits = true;
-        int id = this.hoveredSlot.index;
-        // Grid areas: ONLY Backpack/Vest (44-88)
-        // Vicinity (0-29) and Pockets (39-43) are NOT grid areas for multi-slot occupancy
-        boolean isGridArea = (id >= 44 && id <= 88);
-        
-        int previewW = w;
-        int previewH = h;
+               scY = newScY;
+               scH = newScH;
+            }
 
-        if (isGridArea) {
-            // Detailed fit check using the slot's own logic (Tetris grid check)
+            this.enableScissor(scX, scY, areaWidth, scH);
+            if (hasItem) {
+               boolean isDragging = slot == clickedSlot && !draggingItem.isEmpty();
+               if (isDragging) {
+                  RenderSystem.disableScissor();
+                  return true;
+               }
+
+               guiGraphics.pose().pushPose();
+               if (isMultiSlot) {
+                  float availableW = (float)areaWidth;
+                  float availableH = (float)areaHeight;
+                  float scaleX = availableW / 16.0F;
+                  float scaleY = availableH / 16.0F;
+                  float scale = Math.min(scaleX, scaleY);
+                  float renderedWidth = 16.0F * scale;
+                  float renderedHeight = 16.0F * scale;
+                  float offsetX = ((float)areaWidth - renderedWidth) / 2.0F;
+                  float offsetY = ((float)areaHeight - renderedHeight) / 2.0F;
+                  guiGraphics.pose().translate((float)(slot.x - 1) + offsetX, (float)(slot.y - 1) + offsetY, 0.0F);
+                  guiGraphics.pose().scale(scale, scale, 1.0F);
+                  guiGraphics.renderItem(stack, 0, 0);
+                  guiGraphics.pose().popPose();
+                  int decX = slot.x - 1 + areaWidth - 16;
+                  int decY = slot.y - 1 + areaHeight - 16;
+                  guiGraphics.renderItemDecorations(this.font, stack, decX, decY);
+               } else {
+                  guiGraphics.pose().translate((float)slot.x, (float)slot.y, 0.0F);
+                  guiGraphics.renderItem(stack, 0, 0);
+                  guiGraphics.renderItemDecorations(this.font, stack, 0, 0);
+                  guiGraphics.pose().popPose();
+               }
+            } else {
+               Pair<ResourceLocation, ResourceLocation> pair = slot.getNoItemIcon();
+               if (pair != null) {
+                  TextureAtlasSprite sprite = (TextureAtlasSprite)this.minecraft.getTextureAtlas((ResourceLocation)pair.getFirst()).apply((ResourceLocation)pair.getSecond());
+                  guiGraphics.blit(slot.x, slot.y, 0, 16, 16, sprite);
+               }
+            }
+
+            RenderSystem.disableScissor();
+            return true;
+         }
+      }
+   }
+
+   protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
+      int x = 274;
+      int totalContentHeight = ((DayZInventoryMenu)this.menu).totalContentHeight;
+      int maxScroll = totalContentHeight - 188;
+      int scrollPixels = (int)(this.scrollOffs * (float)maxScroll);
+      int guiMinY = 10;
+      int guiMaxY = guiMinY + 188;
+
+      // 方案B：口袋也参与滚动（滚动到底部时口袋自然不可见）
+      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.pockets"), x, ((DayZInventoryMenu)this.menu).pocketsY, scrollPixels, guiMinY, guiMaxY);
+      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.backpack"), x, ((DayZInventoryMenu)this.menu).backpackY, scrollPixels, guiMinY, guiMaxY);
+      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.vest"), x, ((DayZInventoryMenu)this.menu).vestY, scrollPixels, guiMinY, guiMaxY);
+      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.shirt_pocket"), x, ((DayZInventoryMenu)this.menu).shirtY, scrollPixels, guiMinY, guiMaxY);
+      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.pants_pocket"), x, ((DayZInventoryMenu)this.menu).pantsY, scrollPixels, guiMinY, guiMaxY);
+      if (maxScroll > 0) {
+         int scrollX = 270 + this.getInventoryPanelWidth() - 10;
+         int scrollY = 10;
+         this.renderScrollbar(graphics, scrollX, scrollY, maxScroll, totalContentHeight, this.scrollOffs, 188);
+      }
+
+      if (((DayZInventoryMenu)this.menu).isCorpseMode()) {
+         int vicX = 4 + ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+         int vicTotalHeight = ((DayZInventoryMenu)this.menu).totalVicinityHeight;
+         int vicMaxScroll = Math.max(0, vicTotalHeight - 188);
+         int vicScrollPixels = (int)(this.vicinityScrollOffs * (float)vicMaxScroll);
+         int vicGuiMinY = 10;
+         int vicGuiMaxY = vicGuiMinY + 188;
+         this.renderSectionLabel(graphics, Component.translatable("screen.blockz.backpack"), vicX, ((DayZInventoryMenu)this.menu).corpseBackpackY, vicScrollPixels, vicGuiMinY, vicGuiMaxY);
+         this.renderSectionLabel(graphics, Component.translatable("screen.blockz.vest"), vicX, ((DayZInventoryMenu)this.menu).corpseVestY, vicScrollPixels, vicGuiMinY, vicGuiMaxY);
+         this.renderSectionLabel(graphics, Component.translatable("screen.blockz.shirt_pocket"), vicX, ((DayZInventoryMenu)this.menu).corpseShirtY, vicScrollPixels, vicGuiMinY, vicGuiMaxY);
+         this.renderSectionLabel(graphics, Component.translatable("screen.blockz.pants_pocket"), vicX, ((DayZInventoryMenu)this.menu).corpsePantsY, vicScrollPixels, vicGuiMinY, vicGuiMaxY);
+         if (vicMaxScroll > 0) {
+            int vicOffset = ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+            int vicPanelW = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+            int scrollX = 0 + vicOffset + vicPanelW - 14;
+            int scrollY = 10;
+            this.renderScrollbar(graphics, scrollX, scrollY, vicMaxScroll, vicTotalHeight, this.vicinityScrollOffs);
+         }
+      }
+
+   }
+
+   private void renderScrollbar(GuiGraphics graphics, int scrollX, int scrollY, int maxScroll, int totalHeight, float currentScrollOffs, int viewH) {
+      int scrollH = viewH;
+      graphics.fill(scrollX, scrollY, scrollX + 8, scrollY + scrollH, 268435456);
+      int thumbH = Math.max(10, (int)((float)scrollH * ((float)scrollH / (float)totalHeight)));
+      int thumbY = (int)((float)(scrollH - thumbH) * currentScrollOffs);
+      thumbY = Mth.clamp(thumbY, 0, scrollH - thumbH);
+      graphics.fill(scrollX + 1, scrollY + thumbY, scrollX + 7, scrollY + thumbY + thumbH, 1090519039);
+      graphics.fill(scrollX + 2, scrollY + thumbY + 1, scrollX + 6, scrollY + thumbY + thumbH - 1, 1342177283);
+      graphics.fill(scrollX + 3, scrollY + thumbY + 2, scrollX + 5, scrollY + thumbY + thumbH - 2, 1090519039);
+   }
+
+   private void renderScrollbar(GuiGraphics graphics, int scrollX, int scrollY, int maxScroll, int totalHeight, float currentScrollOffs) {
+      this.renderScrollbar(graphics, scrollX, scrollY, maxScroll, totalHeight, currentScrollOffs, 188);
+   }
+
+   private void renderSectionLabel(GuiGraphics graphics, Component text, int x, int baseY, int scrollPixels, int minY, int maxY) {
+      if (baseY >= -500) {
+         int y = baseY - 12 - scrollPixels;
+         if (y + 8 > minY && y < maxY) {
+            graphics.drawString(this.font, text, x, y, -5592406, true);
+         }
+
+      }
+   }
+
+   private void renderLockedSlots(GuiGraphics graphics) {
+      if (!ClientSettings.dayzEnabled && !this.minecraft.player.hasPermissions(2) && !(((DayZInventoryMenu)this.menu).getActiveContainer() instanceof CorpseEntity)) {
+         graphics.pose().pushPose();
+         graphics.pose().translate(0.0F, 0.0F, 300.0F);
+         int bpStart = ((DayZInventoryMenu)this.menu).getBackpackSlotStart();
+         int bpEnd = ((DayZInventoryMenu)this.menu).getBackpackSlotEnd();
+
+         for(int i = bpStart; i <= bpEnd && i < ((DayZInventoryMenu)this.menu).slots.size(); ++i) {
+            Slot slot = (Slot)((DayZInventoryMenu)this.menu).slots.get(i);
+            if (slot.y >= -2000 && slot.isActive()) {
+               int x = this.leftPos + slot.x;
+               int y = this.topPos + slot.y;
+               graphics.fill(x, y, x + 16, y + 16, Integer.MIN_VALUE);
+               RenderSystem.setShaderTexture(0, LOCK_ICON);
+               RenderSystem.enableBlend();
+               graphics.blit(LOCK_ICON, x, y, 0.0F, 0.0F, 16, 16, 16, 16);
+            }
+         }
+
+         graphics.pose().popPose();
+      }
+   }
+
+   private void renderPlayerInInventory(GuiGraphics graphics, int x, int y, int mouseX, int mouseY) {
+      if (this.minecraft.player != null) {
+         graphics.pose().pushPose();
+         InventoryScreen.renderEntityInInventoryFollowsMouse(graphics, x, y, 32, (float)x - (float)mouseX, (float)y - 50.0F - (float)mouseY, this.minecraft.player);
+         graphics.pose().popPose();
+      }
+   }
+
+   private void renderSlotIcons(GuiGraphics graphics) {
+      for(int slotId = 0; slotId < ((DayZInventoryMenu)this.menu).slots.size(); ++slotId) {
+         Slot slot = (Slot)((DayZInventoryMenu)this.menu).slots.get(slotId);
+         if (slot.isActive() && !slot.hasItem()) {
+            int slotX = this.leftPos + slot.x;
+            int slotY = this.topPos + slot.y;
+            ResourceLocation icon = this.getSlotIcon(slotId);
+            if (icon != null) {
+               RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 0.4F);
+               graphics.blit(icon, slotX, slotY, 0.0F, 0.0F, 16, 16, 16, 16);
+               RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+            }
+         }
+      }
+
+   }
+
+   private ResourceLocation getSlotIcon(int slotId) {
+      int vSlots = 81;
+      if (slotId >= 0 && slotId < vSlots) {
+         if (((DayZInventoryMenu)this.menu).getActiveContainer() instanceof CorpseEntity) {
+            if (slotId == 4) {
+               return UITextures.SLOT_HEADGEAR;
+            }
+
+            if (slotId == 7) {
+               return UITextures.SLOT_MASK;
+            }
+
+            if (slotId == 2) {
+               return UITextures.SLOT_SHIRT;
+            }
+
+            if (slotId == 1) {
+               return UITextures.SLOT_VEST;
+            }
+
+            if (slotId == 6) {
+               return UITextures.SLOT_OFFHAND;
+            }
+
+            if (slotId == 8) {
+               return UITextures.SLOT_GLOVES;
+            }
+
+            if (slotId == 3) {
+               return UITextures.SLOT_PANTS;
+            }
+
+            if (slotId == 5) {
+               return UITextures.SLOT_SHOES;
+            }
+
+            if (slotId == 0) {
+               return UITextures.SLOT_BACKPACK;
+            }
+         }
+
+         return null;
+      } else if (slotId == vSlots + 0) {
+         return UITextures.SLOT_HEADGEAR;
+      } else if (slotId == vSlots + 1) {
+         return UITextures.SLOT_SHIRT;
+      } else if (slotId == vSlots + 2) {
+         return UITextures.SLOT_PANTS;
+      } else if (slotId == vSlots + 3) {
+         return UITextures.SLOT_SHOES;
+      } else if (slotId == vSlots + 4) {
+         return UITextures.SLOT_OFFHAND;
+      } else if (slotId == vSlots + 5) {
+         return UITextures.SLOT_BACKPACK;
+      } else if (slotId == vSlots + 6) {
+         return UITextures.SLOT_VEST;
+      } else if (slotId == vSlots + 7) {
+         return UITextures.SLOT_GLOVES;
+      } else {
+         return slotId == vSlots + 8 ? UITextures.SLOT_MASK : null;
+      }
+   }
+
+   private void drawPanel(GuiGraphics graphics, int x, int y, int w, int h, String title) {
+      graphics.fill(x, y, x + w, y + h, -1342177280);
+      graphics.fill(x, y - 1, x + w, y, -11184811);
+      graphics.fill(x, y + h, x + w, y + h + 1, -11184811);
+      graphics.fill(x - 1, y, x, y + h, -11184811);
+      graphics.fill(x + w, y, x + w + 1, y + h, -11184811);
+      graphics.fill(x, y - 12, x + w, y, -872415232);
+      graphics.drawString(this.font, title, x + 4, y - 10, -2236963, false);
+   }
+
+   private void renderTetrisFootprints(GuiGraphics graphics) {
+      int invScissorX = this.leftPos + 270;
+      int invScissorY = this.topPos + 10 - 1;
+      int panelW = this.getInventoryPanelWidth();
+      int viewH = 190;
+      graphics.enableScissor(invScissorX, invScissorY, invScissorX + panelW, invScissorY + viewH);
+      this.renderFootprintsForRange(graphics, ((DayZInventoryMenu)this.menu).getBackpackSlotStart(), ((DayZInventoryMenu)this.menu).getBackpackSlotEnd(), ((DayZInventoryMenu)this.menu).getInventoryMaxCols(), true);
+      graphics.disableScissor();
+      int corpseStart = ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart();
+      int corpseEnd = ((DayZInventoryMenu)this.menu).getCorpseStorageSlotEnd();
+      if (corpseStart >= 0 && corpseEnd >= corpseStart) {
+         int vicScissorX = this.leftPos + 0 + ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+         int vicScissorY = this.topPos + 10 - 1;
+         int vicW = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+         graphics.enableScissor(vicScissorX, vicScissorY, vicScissorX + vicW, vicScissorY + viewH);
+         this.renderFootprintsForRange(graphics, corpseStart, corpseEnd, ((DayZInventoryMenu)this.menu).getVicinityCols(), true);
+         graphics.disableScissor();
+      }
+
+   }
+
+   private void renderFootprintsForRange(GuiGraphics graphics, int startIdx, int endIdx, int cols, boolean isInventory) {
+      for(int i = startIdx; i <= endIdx && i < ((DayZInventoryMenu)this.menu).slots.size(); ++i) {
+         Slot slot = (Slot)((DayZInventoryMenu)this.menu).slots.get(i);
+         if (slot.hasItem()) {
+            ItemStack stack = slot.getItem();
+            ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
+            if (size.width() > 1 || size.height() > 1) {
+               int slotX = this.leftPos + slot.x - 1;
+               int slotY = this.topPos + slot.y - 1;
+               int pixelW = size.width() * 18;
+               int pixelH = size.height() * 18;
+               graphics.fill(slotX + 1, slotY + 1, slotX + pixelW - 1, slotY + pixelH - 1, 1627389866);
+               graphics.renderOutline(slotX, slotY, pixelW, pixelH, -1593835606);
+            }
+         }
+      }
+
+   }
+
+   public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+      this.renderBackground(graphics);
+      super.render(graphics, mouseX, mouseY, partialTick);
+      this.renderCarriedItemPreview(graphics, mouseX, mouseY);
+      if (this.hoveredSlot != null && this.hoveredSlot.hasItem() && ((DayZInventoryMenu)this.menu).getCarried().isEmpty()) {
+         ItemStack stack = this.hoveredSlot.getItem();
+         String name = stack.getHoverName().getString();
+         graphics.drawString(this.font, name, mouseX + 12, mouseY - 12, -1, true);
+      }
+
+      if (((DayZInventoryMenu)this.menu).isEnchantingTable) {
+         this.renderEnchantingInfo(graphics, mouseX, mouseY);
+      }
+
+      this.renderLockedSlots(graphics);
+      this.renderTooltip(graphics, mouseX, mouseY);
+   }
+
+   private void renderCarriedItemPreview(GuiGraphics graphics, int mouseX, int mouseY) {
+      ItemStack carried = ((DayZInventoryMenu)this.menu).getCarried();
+      if (!carried.isEmpty() && this.hoveredSlot != null) {
+         ItemSizeManager.ItemSize size = ItemSizeManager.getSize(carried);
+         int w = size.width();
+         int h = size.height();
+         boolean fits = true;
+         int id = this.hoveredSlot.index;
+         boolean isGridArea = id >= ((DayZInventoryMenu)this.menu).getBackpackSlotStart() && id <= ((DayZInventoryMenu)this.menu).getBackpackSlotEnd() || ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() >= 0 && id >= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() && id <= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotEnd();
+         int previewW = w;
+         int previewH = h;
+         if (isGridArea) {
             fits = this.hoveredSlot.mayPlace(carried);
-        } else {
-            // Non-grid area: Items only take ONE slot regardless of size
+         } else {
             previewW = 1;
             previewH = 1;
             fits = this.hoveredSlot.mayPlace(carried);
-        }
+         }
 
-        int slotX = this.leftPos + this.hoveredSlot.x - 1;
-        int slotY = this.topPos + this.hoveredSlot.y - 1;
-        int pixelW = previewW * UIConstants.SLOT_PITCH;
-        int pixelH = previewH * UIConstants.SLOT_PITCH;
+         int slotX = this.leftPos + this.hoveredSlot.x - 1;
+         int slotY = this.topPos + this.hoveredSlot.y - 1;
+         int pixelW = previewW * 18;
+         int pixelH = previewH * 18;
+         int color = fits ? -2141847723 : -2130750123;
+         graphics.pose().pushPose();
+         graphics.pose().translate(0.0F, 0.0F, 250.0F);
+         graphics.renderOutline(slotX, slotY, pixelW, pixelH, color | -16777216);
+         graphics.fill(slotX + 1, slotY + 1, slotX + pixelW - 1, slotY + pixelH - 1, color);
+         graphics.pose().popPose();
+      }
+   }
 
-        int color = fits ? 0x8055FF55 : 0x80FF5555; // Green if fits, Red if not
-        
-        graphics.pose().pushPose();
-        graphics.pose().translate(0, 0, 250); // Draw above slots and items
-        graphics.renderOutline(slotX, slotY, pixelW, pixelH, color | 0xFF000000); // Opaque border
-        graphics.fill(slotX + 1, slotY + 1, slotX + pixelW - 1, slotY + pixelH - 1, color); // Semi-transparent fill
-        graphics.pose().popPose();
-    }
+   private void renderEnchantingInfo(GuiGraphics graphics, int mouseX, int mouseY) {
+      int centerX = this.leftPos + 0 + 48;
+      int startY = this.topPos + 10 + 80;
 
-    private void renderEnchantingInfo(GuiGraphics graphics, int mouseX, int mouseY) {
-        int centerX = this.leftPos + UIConstants.VICINITY_X + UIConstants.PANEL_W / 2;
-        int startY = this.topPos + UIConstants.VICINITY_SLOTS_Y + 80;
-        
-        for (int i = 0; i < 3; i++) {
-            int y = startY + i * 20;
-            int cost = this.menu.costs[i];
-            int clue = this.menu.enchantClue[i];
-            int level = this.menu.levelClue[i];
-            
-            if (cost == 0) {
-                // Disabled button
-                graphics.fill(centerX - 40, y, centerX + 40, y + 18, 0x50000000);
-                graphics.drawString(this.font, "---", centerX - 6, y + 5, 0xFF555555, false);
+      for(int i = 0; i < 3; ++i) {
+         int y = startY + i * 20;
+         int cost = ((DayZInventoryMenu)this.menu).costs[i];
+         int clue = ((DayZInventoryMenu)this.menu).enchantClue[i];
+         int level = ((DayZInventoryMenu)this.menu).levelClue[i];
+         if (cost == 0) {
+            graphics.fill(centerX - 40, y, centerX + 40, y + 18, 1342177280);
+            graphics.drawString(this.font, "---", centerX - 6, y + 5, -11184811, false);
+         } else {
+            boolean hovered = mouseX >= centerX - 40 && mouseX <= centerX + 40 && mouseY >= y && mouseY <= y + 18;
+            int color = hovered ? -2130706433 : 1342177280;
+            graphics.fill(centerX - 40, y, centerX + 40, y + 18, color);
+            graphics.renderOutline(centerX - 40, y, 80, 18, -5592406);
+            String text = "LVL " + cost;
+            graphics.drawString(this.font, text, centerX - 35, y + 5, -11141291, true);
+            if (hovered && clue >= 0) {
+               Enchantment enchant = (Enchantment)RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY).registry(Registries.ENCHANTMENT).get().byId(clue);
+               if (enchant != null) {
+                  MutableComponent clueText = enchant.getFullname(level).copy();
+                  graphics.renderTooltip(this.font, clueText, mouseX, mouseY);
+               }
+            }
+         }
+      }
+
+   }
+
+   protected void containerTick() {
+      super.containerTick();
+      ((DayZInventoryMenu)this.menu).updateSlotPositions();
+      this.applyInventoryScroll();
+      this.applyVicinityScroll();
+   }
+
+   private void applyInventoryScroll() {
+      int totalContentHeight = ((DayZInventoryMenu)this.menu).totalContentHeight;
+      int maxScroll = totalContentHeight - 188;
+      if (maxScroll <= 0) {
+         this.scrollOffs = 0.0F;
+      }
+
+      int scrollPixels = (int)(this.scrollOffs * (float)maxScroll);
+      int guiMinY = 10;
+      int guiMaxY = guiMinY + 188;
+      // 方案B：口袋 + 扩展区一起滚动
+      int startIdx = ((DayZInventoryMenu)this.menu).getPocketStart();
+      int endIdx = ((DayZInventoryMenu)this.menu).getBackpackSlotEnd();
+
+      for(int i = startIdx; i <= endIdx; ++i) {
+         this.updateSlotScroll(i, scrollPixels, guiMinY, guiMaxY, false);
+      }
+
+   }
+
+   private void applyVicinityScroll() {
+      int totalVicinityHeight = ((DayZInventoryMenu)this.menu).totalVicinityHeight;
+      int maxScroll = totalVicinityHeight - 188;
+      if (maxScroll <= 0) {
+         this.vicinityScrollOffs = 0.0F;
+      }
+
+      int scrollPixels = (int)(this.vicinityScrollOffs * (float)maxScroll);
+      int guiMinY = 10;
+      int guiMaxY = guiMinY + 188;
+
+      int corpseStart;
+      for(corpseStart = 0; corpseStart < 81; ++corpseStart) {
+         this.updateSlotScroll(corpseStart, scrollPixels, guiMinY, guiMaxY, false);
+      }
+
+      corpseStart = ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart();
+      int corpseEnd = ((DayZInventoryMenu)this.menu).getCorpseStorageSlotEnd();
+      if (corpseStart >= 0 && corpseEnd >= corpseStart) {
+         for(int i = corpseStart; i <= corpseEnd; ++i) {
+            this.updateSlotScroll(i, scrollPixels, guiMinY, guiMaxY, false);
+         }
+      }
+
+   }
+
+   private void updateSlotScroll(int slotIndex, int scrollPixels, int guiMinY, int guiMaxY, boolean strictTop) {
+      if (slotIndex < ((DayZInventoryMenu)this.menu).slots.size()) {
+         Slot slot = (Slot)((DayZInventoryMenu)this.menu).slots.get(slotIndex);
+         if (slot.y >= -2000) {
+            int newY = slot.y - scrollPixels;
+            if (strictTop && newY < guiMinY) {
+               this.setSlotPos(slot, -10000, -10000);
+               return;
+            }
+
+            if (newY + 16 >= guiMinY && newY <= guiMaxY) {
+               this.setSlotPos(slot, slot.x, newY);
             } else {
-                // Enabled button
-                boolean hovered = mouseX >= centerX - 40 && mouseX <= centerX + 40 && mouseY >= y && mouseY <= y + 18;
-                int color = hovered ? 0x80FFFFFF : 0x50000000;
-                graphics.fill(centerX - 40, y, centerX + 40, y + 18, color);
-                graphics.renderOutline(centerX - 40, y, 80, 18, 0xFFAAAAAA);
-                
-                String text = "LVL " + cost;
-                graphics.drawString(this.font, text, centerX - 35, y + 5, 0xFF55FF55, true);
-                
-                // Show clue if hovered
-                if (hovered && clue >= 0) {
-                     // Get enchantment name
-                     net.minecraft.world.item.enchantment.Enchantment enchant = net.minecraft.core.RegistryAccess.fromRegistryOfRegistries(net.minecraft.core.registries.BuiltInRegistries.REGISTRY).registryOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT).byId(clue);
-                     if (enchant != null) {
-                         net.minecraft.network.chat.MutableComponent clueText = enchant.getFullname(level).copy();
-                         graphics.renderTooltip(this.font, clueText, mouseX, mouseY);
-                     }
-                }
+               this.setSlotPos(slot, -10000, -10000);
             }
-        }
-    }
 
-    @Override
-    protected void containerTick() {
-        super.containerTick();
-        this.menu.updateSlotPositions();
-        applyScroll();
-    }
+         }
+      }
+   }
 
-    private void applyScroll() {
-        int totalContentHeight = this.menu.totalContentHeight;
-        int maxScroll = totalContentHeight - VIEW_HEIGHT;
-        if (maxScroll <= 0) {
-            scrollOffs = 0;
-            return;
-        }
+   private void setSlotPos(Slot slot, int x, int y) {
+      try {
+         if (SLOT_X_FIELD != null) {
+            SLOT_X_FIELD.setInt(slot, x);
+         }
 
-        int scrollPixels = (int) (this.scrollOffs * maxScroll);
-        int startY = this.topPos + UIConstants.INVENTORY_SLOTS_Y;
+         if (SLOT_Y_FIELD != null) {
+            SLOT_Y_FIELD.setInt(slot, y);
+         }
+      } catch (Exception var5) {
+      }
 
-        // Apply scroll to Pockets (39-43) and Backpack/Vest/etc (44-88)
-        for (int i = 39; i <= 88; i++) {
-            if (i < this.menu.slots.size()) {
-                Slot slot = this.menu.slots.get(i);
-                // Check if slot was hidden by Menu (-10000)
-                if (slot.y < -2000) continue;
+   }
 
-                // Adjust Y
-                int newY = slot.y - scrollPixels;
-                
-                // Hide if out of bounds
-                // Note: slot.y is relative to topPos in Menu?
-                // Actually DayZInventoryMenu sets x,y relative to UIConstants
-                // which are relative to top-left of the GUI.
-                // slot.y in Menu is relative to the GUI top-left.
-                // So slot.y 40 is 40 pixels from top of GUI.
-                
-                // Visible range in GUI coordinates:
-                int guiMinY = UIConstants.INVENTORY_SLOTS_Y;
-                int guiMaxY = guiMinY + VIEW_HEIGHT;
-
-                if (newY + 16 < guiMinY || newY > guiMaxY) {
-                     setSlotPos(slot, -10000, -10000);
-                } else {
-                     setSlotPos(slot, slot.x, newY);
-                }
-                
-                // Adjust section labels similarly (just storing them in menu for now, but we need to render them with offset)
-                // We'll handle label rendering offset in renderLabels
+   public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+      int vicOffset = ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+      int vicPanelW = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+      int vicStartX = this.leftPos + 0 + vicOffset;
+      boolean overVicinity = mouseX >= (double)vicStartX && mouseX < (double)(vicStartX + vicPanelW);
+      boolean overInventory = mouseX >= (double)(this.leftPos + 270) && mouseX < (double)(this.leftPos + 270 + this.getInventoryPanelWidth());
+      boolean overPanelY = mouseY >= (double)(this.topPos + 0) && mouseY < (double)(this.topPos + 0 + 200);
+      if (overPanelY) {
+         int totalContentHeight;
+         int i;
+         if (overVicinity) {
+            totalContentHeight = ((DayZInventoryMenu)this.menu).totalVicinityHeight;
+            if (totalContentHeight > 188) {
+               i = totalContentHeight - 188;
+               this.vicinityScrollOffs = (float)((double)this.vicinityScrollOffs - delta / (double)i * 16.0D);
+               this.vicinityScrollOffs = Mth.clamp(this.vicinityScrollOffs, 0.0F, 1.0F);
+               ((DayZInventoryMenu)this.menu).updateSlotPositions();
+               this.applyVicinityScroll();
+               this.applyInventoryScroll();
+               return true;
             }
-        }
-        
-        // Adjust Label positions in Menu for rendering?
-        // No, menu.pocketsY etc are integers. We should apply scroll when rendering labels.
-    }
-
-    private static java.lang.reflect.Field SLOT_X_FIELD;
-    private static java.lang.reflect.Field SLOT_Y_FIELD;
-
-    static {
-        try {
-            // 尝试使用 ObfuscationReflectionHelper 获取字段 (适用于生产环境 SRG 名)
-            try {
-                SLOT_X_FIELD = ObfuscationReflectionHelper.findField(Slot.class, "f_40220_"); // x
-                SLOT_Y_FIELD = ObfuscationReflectionHelper.findField(Slot.class, "f_40221_"); // y
-            } catch (Exception e) {
-                // 如果失败 (例如在某些开发环境中)，尝试直接获取
-                SLOT_X_FIELD = net.minecraft.world.inventory.Slot.class.getDeclaredField("x");
-                SLOT_Y_FIELD = net.minecraft.world.inventory.Slot.class.getDeclaredField("y");
+         } else if (overInventory) {
+            totalContentHeight = ((DayZInventoryMenu)this.menu).totalContentHeight;
+            if (totalContentHeight > 188) {
+               i = totalContentHeight - 188;
+               this.scrollOffs = (float)((double)this.scrollOffs - delta / (double)i * 8.0D);
+               this.scrollOffs = Mth.clamp(this.scrollOffs, 0.0F, 1.0F);
+               ((DayZInventoryMenu)this.menu).updateSlotPositions();
+               this.applyInventoryScroll();
+               this.applyVicinityScroll();
+               return true;
             }
-            SLOT_X_FIELD.setAccessible(true);
-            SLOT_Y_FIELD.setAccessible(true);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+         }
+      }
 
-    private void setSlotPos(Slot slot, int x, int y) {
-        try {
-            if (SLOT_X_FIELD != null) SLOT_X_FIELD.setInt(slot, x);
-            if (SLOT_Y_FIELD != null) SLOT_Y_FIELD.setInt(slot, y);
-        } catch (Exception e) {
-            // Ignore
-        }
-    }
+      return super.mouseScrolled(mouseX, mouseY, delta);
+   }
 
-    @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        int totalContentHeight = this.menu.totalContentHeight;
-        if (totalContentHeight > VIEW_HEIGHT) {
-            int i = totalContentHeight - VIEW_HEIGHT;
-            // Scroll speed factor
-            this.scrollOffs = (float)((double)this.scrollOffs - delta / (double)i * 16.0D);
-            this.scrollOffs = net.minecraft.util.Mth.clamp(this.scrollOffs, 0.0F, 1.0F);
-            this.menu.updateSlotPositions(); // Reset positions first
-            applyScroll(); // Re-apply scroll
+   public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+      int j;
+      int k;
+      if (this.isScrolling) {
+         j = this.topPos + 10;
+         k = j + 188;
+         this.scrollOffs = ((float)mouseY - (float)j - 7.5F) / ((float)(k - j) - 15.0F);
+         this.scrollOffs = Mth.clamp(this.scrollOffs, 0.0F, 1.0F);
+         ((DayZInventoryMenu)this.menu).updateSlotPositions();
+         this.applyInventoryScroll();
+         this.applyVicinityScroll();
+         return true;
+      } else if (this.isVicinityScrolling) {
+         j = this.topPos + 10;
+         k = j + 188;
+         this.vicinityScrollOffs = ((float)mouseY - (float)j - 7.5F) / ((float)(k - j) - 15.0F);
+         this.vicinityScrollOffs = Mth.clamp(this.vicinityScrollOffs, 0.0F, 1.0F);
+         ((DayZInventoryMenu)this.menu).updateSlotPositions();
+         this.applyVicinityScroll();
+         this.applyInventoryScroll();
+         return true;
+      } else {
+         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+      }
+   }
+
+   protected boolean hasClickedOutside(double mouseX, double mouseY, int leftPos, int topPos, int button) {
+      int minX = leftPos + 0;
+      int maxX = leftPos + 270 + this.getInventoryPanelWidth();
+      int minY = topPos + 0;
+      int maxY = topPos + 0 + 200;
+      boolean inside = mouseX >= (double)minX && mouseX < (double)maxX && mouseY >= (double)minY && mouseY < (double)maxY;
+      return !inside;
+   }
+
+   public boolean mouseClicked(double mouseX, double mouseY, int button) {
+      this.clickStartedInVicinitySlot = false;
+      if (button == 0 && ((DayZInventoryMenu)this.menu).supportsContainerPaging() && this.handleVicinityPageClick(mouseX, mouseY)) {
+         return true;
+      } else {
+         int startY;
+         int i;
+         int y;
+         if (button == 0 || button == 1) {
+            Slot slot = this.findSlotAt(mouseX, mouseY);
+            if (slot != null && slot.isActive()) {
+               startY = slot.index;
+               i = ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart();
+               y = ((DayZInventoryMenu)this.menu).getCorpseStorageSlotEnd();
+               if (startY >= 0 && startY < 81) {
+                  this.clickStartedInVicinitySlot = true;
+               } else if (i >= 0 && startY >= i && startY <= y) {
+                  this.clickStartedInVicinitySlot = true;
+               }
+            }
+         }
+
+         int centerX;
+         if (button == 0) {
+            centerX = this.leftPos + 270 + this.getInventoryPanelWidth() - 14;
+            startY = this.topPos + 10;
+            int w = 8;
+            int h = 188;
+            if (mouseX >= (double)centerX && mouseX < (double)(centerX + w) && mouseY >= (double)startY && mouseY < (double)(startY + h)) {
+               this.isScrolling = this.totalContentSizeGreaterThanView();
+               if (this.isScrolling) {
+                  return true;
+               }
+            }
+
+            int vicOffset = ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+            int vicPanelW = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+            int vx = this.leftPos + 0 + vicOffset + vicPanelW - 14;
+            int vy = this.topPos + 10;
+            if (mouseX >= (double)vx && mouseX < (double)(vx + w) && mouseY >= (double)vy && mouseY < (double)(vy + h)) {
+               this.isVicinityScrolling = ((DayZInventoryMenu)this.menu).totalVicinityHeight > 188;
+               if (this.isVicinityScrolling) {
+                  return true;
+               }
+            }
+         }
+
+         if (((DayZInventoryMenu)this.menu).isEnchantingTable && button == 0) {
+            centerX = this.leftPos + 0 + 48;
+            startY = this.topPos + 10 + 80;
+
+            for(i = 0; i < 3; ++i) {
+               y = startY + i * 20;
+               if (mouseX >= (double)(centerX - 40) && mouseX <= (double)(centerX + 40) && mouseY >= (double)y && mouseY <= (double)(y + 18) && ((DayZInventoryMenu)this.menu).costs[i] > 0) {
+                  this.minecraft.gameMode.handleInventoryButtonClick(((DayZInventoryMenu)this.menu).containerId, i);
+                  return true;
+               }
+            }
+         }
+
+         return super.mouseClicked(mouseX, mouseY, button);
+      }
+   }
+
+   public boolean mouseReleased(double mouseX, double mouseY, int button) {
+      if (button == 0) {
+         this.isScrolling = false;
+         this.isVicinityScrolling = false;
+      }
+
+      if (button == 0 || button == 1) {
+         ItemStack carried = ((DayZInventoryMenu)this.menu).getCarried();
+         if (!carried.isEmpty()) {
+            int vicX = 0 + ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+            int vicW = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+            int vicY = 0;
+            int vicH = 200;
+            if (!this.clickStartedInVicinitySlot && this.isHovering(vicX, vicY, vicW, vicH, mouseX, mouseY)) {
+               Slot slot = this.findSlotAt(mouseX, mouseY);
+               if (slot == null || !slot.isActive()) {
+                  this.minecraft.gameMode.handleInventoryMouseClick(((DayZInventoryMenu)this.menu).containerId, -999, button, ClickType.PICKUP, this.minecraft.player);
+                  this.clickStartedInVicinitySlot = false;
+                  return true;
+               }
+            }
+         }
+      }
+
+      this.clickStartedInVicinitySlot = false;
+      return super.mouseReleased(mouseX, mouseY, button);
+   }
+
+   private Slot findSlotAt(double mouseX, double mouseY) {
+      for(int i = 0; i < ((DayZInventoryMenu)this.menu).slots.size(); ++i) {
+         Slot slot = (Slot)((DayZInventoryMenu)this.menu).slots.get(i);
+         if (slot.isActive() && this.isHovering(slot.x, slot.y, 16, 16, mouseX, mouseY)) {
+            return slot;
+         }
+      }
+
+      return null;
+   }
+
+   private boolean handleVicinityPageClick(double mouseX, double mouseY) {
+      int vicOffset = ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+      int vicPanelW = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+      int vicPanelX = this.leftPos + 0 + vicOffset;
+      int titleY = this.topPos + 0 - 12;
+      int rightArrowX = vicPanelX + vicPanelW - 12;
+      int leftArrowX = rightArrowX - 12;
+      int buttonW = 8;
+      int buttonH = 10;
+      if (mouseY >= (double)titleY && mouseY <= (double)(titleY + buttonH)) {
+         if (mouseX >= (double)leftArrowX && mouseX <= (double)(leftArrowX + buttonW)) {
+            ((DayZInventoryMenu)this.menu).setContainerPage(((DayZInventoryMenu)this.menu).getContainerPage() - 1);
+            this.minecraft.gameMode.handleInventoryButtonClick(((DayZInventoryMenu)this.menu).containerId, 100);
+            this.vicinityScrollOffs = 0.0F;
+            ((DayZInventoryMenu)this.menu).updateSlotPositions();
+            this.applyVicinityScroll();
+            this.applyInventoryScroll();
             return true;
-        }
-        return super.mouseScrolled(mouseX, mouseY, delta);
-    }
-    
-    @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (this.isScrolling) {
-            int j = this.topPos + UIConstants.INVENTORY_SLOTS_Y;
-            int k = j + VIEW_HEIGHT;
-            this.scrollOffs = ((float)mouseY - (float)j - 7.5F) / ((float)(k - j) - 15.0F);
-            this.scrollOffs = net.minecraft.util.Mth.clamp(this.scrollOffs, 0.0F, 1.0F);
-            this.menu.updateSlotPositions();
-            applyScroll();
+         }
+
+         if (mouseX >= (double)rightArrowX && mouseX <= (double)(rightArrowX + buttonW)) {
+            ((DayZInventoryMenu)this.menu).setContainerPage(((DayZInventoryMenu)this.menu).getContainerPage() + 1);
+            this.minecraft.gameMode.handleInventoryButtonClick(((DayZInventoryMenu)this.menu).containerId, 101);
+            this.vicinityScrollOffs = 0.0F;
+            ((DayZInventoryMenu)this.menu).updateSlotPositions();
+            this.applyVicinityScroll();
+            this.applyInventoryScroll();
             return true;
-        }
-        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
-    }
+         }
+      }
 
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // 1. Scrollbar Logic
-        if (button == 0) {
-            int x = this.leftPos + UIConstants.INVENTORY_X + UIConstants.PANEL_W - 14; // Scrollbar X
-            int y = this.topPos + UIConstants.INVENTORY_SLOTS_Y;
-            int w = 8; // Scrollbar Width
-            int h = VIEW_HEIGHT;
-            
-            if (mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h) {
-                this.isScrolling = totalContentSizeGreaterThanView();
-                if (this.isScrolling) return true;
-            }
-        }
+      return false;
+   }
 
-        // 2. Enchanting Table Logic
-        if (this.menu.isEnchantingTable && button == 0) {
-            int centerX = this.leftPos + UIConstants.VICINITY_X + UIConstants.PANEL_W / 2;
-            int startY = this.topPos + UIConstants.VICINITY_SLOTS_Y + 80;
+   private boolean totalContentSizeGreaterThanView() {
+      return ((DayZInventoryMenu)this.menu).totalContentHeight > 188;
+   }
 
-            for (int i = 0; i < 3; i++) {
-                int y = startY + i * 20;
-                if (mouseX >= centerX - 40 && mouseX <= centerX + 40 && mouseY >= y && mouseY <= y + 18) {
-                    if (this.menu.costs[i] > 0) {
-                        this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, i);
-                        return true;
-                    }
-                }
-            }
-        }
+   private int getInventoryPanelWidth() {
+      int maxCols = ((DayZInventoryMenu)this.menu).getInventoryMaxCols();
+      int extraCols = Math.max(0, maxCols - UIConstants.INVENTORY_COLS);
+      return UIConstants.INVENTORY_PANEL_W + extraCols * UIConstants.SLOT_PITCH;
+   }
 
-        return super.mouseClicked(mouseX, mouseY, button);
-    }
-    
-    @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (button == 0) {
-            this.isScrolling = false;
-        }
+   private void updateDynamicLayout() {
+      int maxCols = ((DayZInventoryMenu)this.menu).getInventoryMaxCols();
+      int extraCols = Math.max(0, maxCols - UIConstants.INVENTORY_COLS);
+      int dynamicWidth = UIConstants.WIDTH + extraCols * UIConstants.SLOT_PITCH;
+      if (this.imageWidth != dynamicWidth) {
+         this.imageWidth = dynamicWidth;
+      }
 
-        // 处理“拖拽丢弃”逻辑
-        // 如果释放鼠标时，鼠标在 VICINITY 面板区域内，且当前正在拖拽物品
-        if (button == 0 && !this.menu.getCarried().isEmpty()) {
-            int vicX = this.leftPos + UIConstants.VICINITY_X;
-            int vicY = this.topPos + UIConstants.PANEL_Y;
-            if (mouseX >= vicX && mouseX <= vicX + UIConstants.PANEL_W && 
-                mouseY >= vicY && mouseY <= vicY + UIConstants.PANEL_H) {
-                
-                // 检查是否落在了某个槽位上。
-                // 只要鼠标在槽位范围内，就认为是在进行槽位交互，而不是丢弃到地面。
-                boolean overSlot = false;
-                for (int i = 0; i < this.menu.slots.size(); i++) {
-                    Slot slot = this.menu.slots.get(i);
-                    if (slot.isActive() && isHovering(slot.x, slot.y, 16, 16, mouseX, mouseY)) {
-                        overSlot = true;
-                        break;
-                    }
-                }
+      int vicOffset = ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+      int vicLeft = 0 + vicOffset;
+      int right = dynamicWidth;
+      int centerNorm = (vicLeft + right) / 2;
+      this.leftPos = this.width / 2 - centerNorm;
+      this.topPos = (this.height - 200) / 2;
+   }
 
-                if (!overSlot) {
-                    // 丢弃物品：模拟点击 UI 外部
-                    this.minecraft.gameMode.handleInventoryMouseClick(this.menu.containerId, -999, 0, ClickType.PICKUP, this.minecraft.player);
-                    return true;
-                }
-            }
-        }
-        return super.mouseReleased(mouseX, mouseY, button);
-    }
+   public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+      if (ModKeyMappings.ROTATE_ITEM != null && ModKeyMappings.ROTATE_ITEM.matches(keyCode, scanCode)) {
+         ItemStack carried = ((DayZInventoryMenu)this.menu).getCarried();
+         if (!carried.isEmpty()) {
+            ItemSizeManager.toggleRotation(carried);
+            NetworkHandler.CHANNEL.sendToServer(new RotateItemC2S());
+            return true;
+         }
+      }
 
-    private boolean totalContentSizeGreaterThanView() {
-        return this.menu.totalContentHeight > VIEW_HEIGHT;
-    }
+      return super.keyPressed(keyCode, scanCode, modifiers);
+   }
 
-    @Override
-    protected boolean isHovering(int x, int y, int w, int h, double mouseX, double mouseY) {
-        return mouseX >= (double)(this.leftPos + x) && mouseX < (double)(this.leftPos + x + w) && mouseY >= (double)(this.topPos + y) && mouseY < (double)(this.topPos + y + h);
-    }
+   private void enableScissor(int x, int y, int width, int height) {
+      Minecraft mc = Minecraft.getInstance();
+      double scale = mc.getWindow().getGuiScale();
+      int sx = (int)((double)x * scale);
+      int sy = (int)((double)mc.getWindow().getHeight() - (double)(y + height) * scale);
+      int endX = (int)((double)(x + width) * scale);
+      int topY = (int)((double)mc.getWindow().getHeight() - (double)y * scale);
+      int sw = Math.max(0, endX - sx);
+      int sh = Math.max(0, topY - sy);
+      RenderSystem.enableScissor(sx, sy, sw, sh);
+   }
 
-    @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (ModKeyMappings.ROTATE_ITEM != null && ModKeyMappings.ROTATE_ITEM.matches(keyCode, scanCode)) {
-            ItemStack carried = this.menu.getCarried();
-            if (!carried.isEmpty()) {
-                // Toggle locally for immediate visual feedback
-                ItemSizeManager.toggleRotation(carried);
-                NetworkHandler.CHANNEL.sendToServer(new RotateItemC2S());
-                return true;
-            }
-        }
-        // 数字键1-9快速移动物品到快捷栏
-        if (keyCode >= 49 && keyCode <= 57) {
-            Slot hovered = this.hoveredSlot;
-            if (hovered != null && hovered.hasItem()) {
-                // 默认行为已经处理了数字键切换，这里可以根据需要自定义
-            }
-        }
-        return super.keyPressed(keyCode, scanCode, modifiers);
-    }
+   static {
+      try {
+         try {
+            SLOT_X_FIELD = ObfuscationReflectionHelper.findField(Slot.class, "f_40220_");
+            SLOT_Y_FIELD = ObfuscationReflectionHelper.findField(Slot.class, "f_40221_");
+         } catch (Exception var1) {
+            SLOT_X_FIELD = Slot.class.getDeclaredField("x");
+            SLOT_Y_FIELD = Slot.class.getDeclaredField("y");
+         }
+
+         SLOT_X_FIELD.setAccessible(true);
+         SLOT_Y_FIELD.setAccessible(true);
+      } catch (Exception var2) {
+         var2.printStackTrace();
+      }
+
+   }
 }

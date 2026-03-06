@@ -8,6 +8,11 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
 
+import com.yitianys.BlockZ.util.InventoryUtils;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.item.ItemStack;
+
 public class LootPickupC2S {
     public final int entityId;
 
@@ -29,8 +34,16 @@ public class LootPickupC2S {
             Player player = ctx.getSender();
             if (player == null) return;
             Entity e = player.level().getEntity(msg.entityId);
-            if (e instanceof ItemEntity item) {
-                item.playerTouch(player);
+            if (e instanceof ItemEntity item && item.isAlive()) {
+                ItemStack stack = item.getItem();
+                if (InventoryUtils.addItemToDayZInventory(player.getInventory(), stack)) {
+                    player.level().playSound(null, player.getX(), player.getY(), player.getZ(),
+                            SoundEvents.ITEM_PICKUP, SoundSource.PLAYERS, 0.2F,
+                            ((player.getRandom().nextFloat() - player.getRandom().nextFloat()) * 0.7F + 1.0F) * 2.0F);
+                    if (stack.isEmpty()) {
+                        item.discard();
+                    }
+                }
             }
         });
         ctx.setPacketHandled(true);

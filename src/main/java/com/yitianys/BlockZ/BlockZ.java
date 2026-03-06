@@ -3,6 +3,7 @@ package com.yitianys.BlockZ;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.client.key.ModKeyMappings;
 import com.yitianys.BlockZ.init.ModCreativeTabs;
+import com.yitianys.BlockZ.init.ModEntities;
 import com.yitianys.BlockZ.init.ModItems;
 import com.yitianys.BlockZ.init.ModMenus;
 import com.yitianys.BlockZ.network.NetworkHandler;
@@ -32,6 +33,8 @@ public class BlockZ {
         context.registerConfig(ModConfig.Type.COMMON, BlockZConfigs.COMMON_SPEC);
         NetworkHandler.init();
         ModItems.ITEMS.register(modBus);
+        ModEntities.register(modBus);
+        modBus.addListener(ModEntities::registerAttributes);
         ModCreativeTabs.CREATIVE_MODE_TABS.register(modBus);
         ModMenus.MENUS.register(modBus);
         modBus.addListener(this::commonSetup);

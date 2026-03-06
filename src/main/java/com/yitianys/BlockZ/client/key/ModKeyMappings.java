@@ -1,5 +1,6 @@
 package com.yitianys.BlockZ.client.key;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.client.ClientSettings;
 import com.yitianys.BlockZ.network.DayzToggleRequestC2S;
@@ -12,7 +13,6 @@ import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import org.lwjgl.glfw.GLFW;
 
 @Mod.EventBusSubscriber(modid = BlockZ.MODID, value = Dist.CLIENT)
 public class ModKeyMappings {
@@ -20,8 +20,8 @@ public class ModKeyMappings {
     public static KeyMapping ROTATE_ITEM;
 
     public static void register(RegisterKeyMappingsEvent event) {
-        OPEN_DAYZ = new KeyMapping("key.blockz.open_dayz", GLFW.GLFW_KEY_I, "key.categories.inventory");
-        ROTATE_ITEM = new KeyMapping("key.blockz.rotate_item", GLFW.GLFW_KEY_SPACE, "key.categories.inventory");
+        OPEN_DAYZ = new KeyMapping("key.blockz.open_dayz", InputConstants.KEY_I, "key.categories.inventory");
+        ROTATE_ITEM = new KeyMapping("key.blockz.rotate_item", InputConstants.KEY_SPACE, "key.categories.inventory");
         event.register(OPEN_DAYZ);
         event.register(ROTATE_ITEM);
     }

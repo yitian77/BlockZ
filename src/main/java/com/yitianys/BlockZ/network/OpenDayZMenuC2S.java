@@ -19,12 +19,11 @@ public class OpenDayZMenuC2S {
             ServerPlayer player = ctx.getSender();
             if (player == null) return;
 
-            com.yitianys.BlockZ.BlockZ.LOGGER.info("Opening DayZ Inventory for player: " + player.getName().getString());
-
             NetworkHooks.openScreen(player, new SimpleMenuProvider(
                 (id, inv, p) -> new DayZInventoryMenu(id, inv),
                 Component.translatable("screen.blockz.dayz")
             ), buf -> {
+                buf.writeInt(com.yitianys.BlockZ.config.BlockZConfigs.initialPocketSlots.get());
                 buf.writeBoolean(false); // 不是通过容器打开的
             });
         });

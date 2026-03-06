@@ -12,9 +12,10 @@ public class ModCreativeTabs {
     public static final DeferredRegister<CreativeModeTab> CREATIVE_MODE_TABS = 
         DeferredRegister.create(Registries.CREATIVE_MODE_TAB, BlockZ.MODID);
 
+    // 捷克挂包图标作为 Tab 图标
     public static final RegistryObject<CreativeModeTab> BLOCKZ_TAB = CREATIVE_MODE_TABS.register("blockz_tab",
         () -> CreativeModeTab.builder()
-            .icon(() -> new ItemStack(ModItems.SMALL_BACKPACK.get()))
+            .icon(() -> new ItemStack(ModItems.BACKPACK_CZECHPOUCH.get()))
             .title(Component.translatable("creativetab.blockz_tab"))
             .displayItems((parameters, output) -> {
                 output.accept(ModItems.BACKPACK_COYOTE.get());
@@ -22,6 +23,7 @@ public class ModCreativeTabs {
                 output.accept(ModItems.BACKPACK_CZECH.get());
                 output.accept(ModItems.BACKPACK_CZECHPOUCH.get());
                 output.accept(ModItems.BACKPACK_PATROLPACK.get());
+                output.accept(ModItems.VEST_0.get());
                 
                 output.accept(ModItems.SHIRT_0.get());
                 output.accept(ModItems.SHIRT_1.get());
@@ -54,11 +56,6 @@ public class ModCreativeTabs {
                 output.accept(ModItems.GLOVES_0.get());
                 output.accept(ModItems.GLOVES_1.get());
                 output.accept(ModItems.GLOVES_2.get());
-
-                // 旧项
-                output.accept(ModItems.SMALL_BACKPACK.get());
-                output.accept(ModItems.MEDIUM_BACKPACK.get());
-                output.accept(ModItems.LARGE_BACKPACK.get());
             })
             .build());
 }

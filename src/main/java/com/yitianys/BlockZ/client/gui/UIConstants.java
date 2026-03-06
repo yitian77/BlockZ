@@ -1,19 +1,23 @@
 package com.yitianys.BlockZ.client.gui;
 
 public class UIConstants {
-    // 总尺寸 (Reduced from 320x240 to 280x200 to fix "too big" issue)
-    public static final int WIDTH = 280;
+    // 总尺寸 (Expanded for 9-col Vicinity)
+    // Vicinity (170) + Gap (2) + Player (96) + Gap (2) + Inventory (96) = 366
+    // 若 cap_width 超过 5，界面会在 Screen 层动态扩展宽度
+    public static final int WIDTH = 366;
     public static final int HEIGHT = 200;
     public static final int GUI_WIDTH = WIDTH;
     public static final int GUI_HEIGHT = HEIGHT;
 
-    // 面板尺寸 (Restored to original height for space)
-    public static final int PANEL_W = 96;
-    public static final int PANEL_H = 200; // Increased to 200 to prevent overlap
+    // 面板尺寸
+    public static final int PANEL_W = 96; // Player panel width
+    public static final int INVENTORY_PANEL_W = 96; // Inventory base width (5 cols)
+    public static final int VICINITY_PANEL_W = 170; // 9-col panel width (9*18 + 8)
+    public static final int PANEL_H = 200; 
     
     // 面板 X 坐标 (居中布局)
-    public static final int VICINITY_X = (WIDTH - (PANEL_W * 3 + 4)) / 2;
-    public static final int PLAYER_X = VICINITY_X + PANEL_W + 2;
+    public static final int VICINITY_X = (WIDTH - (VICINITY_PANEL_W + PANEL_W + INVENTORY_PANEL_W + 4)) / 2;
+    public static final int PLAYER_X = VICINITY_X + VICINITY_PANEL_W + 2;
     public static final int INVENTORY_X = PLAYER_X + PANEL_W + 2;
 
     // 面板 Y 坐标
@@ -74,11 +78,12 @@ public class UIConstants {
 
     // 物品栏布局 (Restored to 5 columns)
     public static final int INVENTORY_COLS = 5;
+    public static final int INVENTORY_MAX_COLS = 6;
     public static final int INVENTORY_SLOTS_X = INVENTORY_X + 4;
     public static final int INVENTORY_SLOTS_Y = PANEL_Y + 10;
 
-    // Vicinity 槽位 (Restored to 5 columns)
-    public static final int VICINITY_COLS = 5;
+    // Vicinity 槽位 (Expanded to 9 columns)
+    public static final int VICINITY_COLS = 9;
     public static final int VICINITY_SLOTS_X = VICINITY_X + 4;
     public static final int VICINITY_SLOTS_Y = PANEL_Y + 10;
 }

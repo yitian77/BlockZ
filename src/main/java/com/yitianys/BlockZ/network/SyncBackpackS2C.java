@@ -1,7 +1,6 @@
 package com.yitianys.BlockZ.network;
 
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
-import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;
@@ -21,6 +20,14 @@ public class SyncBackpackS2C {
         this(0, backpack);
     }
 
+    public int getSlotId() {
+        return slotId;
+    }
+
+    public ItemStack getStack() {
+        return stack;
+    }
+
     public static void encode(SyncBackpackS2C msg, FriendlyByteBuf buf) {
         buf.writeInt(msg.slotId);
         buf.writeItem(msg.stack);
@@ -32,11 +39,7 @@ public class SyncBackpackS2C {
 
     public static void handle(SyncBackpackS2C msg, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
-            if (Minecraft.getInstance().player != null) {
-                Minecraft.getInstance().player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-                    cap.getInventory().setStackInSlot(msg.slotId, msg.stack);
-                });
-            }
+            net.minecraftforge.fml.DistExecutor.unsafeRunWhenOn(net.minecraftforge.api.distmarker.Dist.CLIENT, () -> () -> com.yitianys.BlockZ.client.network.ClientPacketHandler.handleSyncBackpack(msg, ctx));
         });
         ctx.get().setPacketHandled(true);
     }

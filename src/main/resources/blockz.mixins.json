@@ -8,6 +8,7 @@
     "MixinSlot"
   ],
   "client": [
+    "client.MixinAbstractContainerScreen"
   ],
   "injectors": {
     "defaultRequire": 1
