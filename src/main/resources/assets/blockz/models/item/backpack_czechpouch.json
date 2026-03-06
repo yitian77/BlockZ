@@ -1,0 +1,14 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "blockz:item/backpack_czechpouch"
+  },
+  "overrides": [
+    {
+      "predicate": {
+        "custom_model_data": 1
+      },
+      "model": "blockz:item/backpack_czechpouch_3d"
+    }
+  ]
+}

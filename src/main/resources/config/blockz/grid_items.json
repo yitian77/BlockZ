@@ -1,0 +1,137 @@
+{
+  "_info": [
+    "占格物品配置文件 (Grid Items Configuration)",
+    "",
+    "格式说明:",
+    "\"模组ID:物品ID\": {",
+    "  \"width\": 物品在背包中的宽度 (必填, 整数)",
+    "  \"height\": 物品在背包中的高度 (必填, 整数)",
+    "  \"cap_width\": 容量网格宽度 (必填, 整数, 仅对容器有效)",
+    "  \"cap_height\": 容量网格高度 (必填, 整数, 仅对容器有效)",
+    "}",
+    "",
+    "容量说明:",
+    "  使用 cap_width * cap_height 作为容量格子数。",
+    "",
+    "示例:",
+    "\"minecraft:apple\": { \"width\": 1, \"height\": 1 }",
+    "\"blockz:backpack_small\": { \"width\": 2, \"height\": 2, \"cap_width\": 3, \"cap_height\": 3 }",
+    "\"blockz:backpack_example\": { \"width\": 3, \"height\": 3, \"cap_width\": 2, \"cap_height\": 2 }"
+  ],
+  "items": {
+    "blockz:backpack_coyote": { "width": 4, "height": 4, "cap_width": 6, "cap_height": 4 },
+    "blockz:backpack_alice": { "width": 4, "height": 4, "cap_width": 5, "cap_height": 4 },
+    "blockz:backpack_czech": { "width": 3, "height": 3, "cap_width": 4, "cap_height": 4 },
+    "blockz:backpack_czechpouch": { "width": 2, "height": 2, "cap_width": 3, "cap_height": 2 },
+    "blockz:backpack_patrolpack": { "width": 3, "height": 3, "cap_width": 4, "cap_height": 2 },
+    "blockz:small_backpack": { "width": 2, "height": 2, "cap_width": 3, "cap_height": 3 },
+    "blockz:medium_backpack": { "width": 3, "height": 3, "cap_width": 5, "cap_height": 3 },
+    "blockz:large_backpack": { "width": 4, "height": 4, "cap_width": 6, "cap_height": 4 },
+
+    "blockz:vest_0": { "width": 2, "height": 2, "cap_width": 3, "cap_height": 2 },
+
+    "blockz:shirt_0": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_1": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_2": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_3": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_4": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_5": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_6": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_7": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_8": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_9": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_10": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_11": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_12": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_13": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt_14": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+    "blockz:shirt": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 3 },
+
+    "blockz:pants_0": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 2 },
+    "blockz:pants_1": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 2 },
+    "blockz:pants_2": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 2 },
+    "blockz:pants_3": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 2 },
+    "blockz:pants_4": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 2 },
+    "blockz:pants_5": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 2 },
+    "blockz:pants": { "width": 2, "height": 2, "cap_width": 2, "cap_height": 2 },
+
+    "blockz:shoes_0": { "width": 2, "height": 2 },
+    "blockz:shoes_1": { "width": 2, "height": 2 },
+    "blockz:shoes_2": { "width": 2, "height": 2 },
+    "blockz:shoes_3": { "width": 2, "height": 2 },
+    "blockz:shoes": { "width": 2, "height": 2 },
+
+    "blockz:gloves_0": { "width": 1, "height": 1 },
+    "blockz:gloves_1": { "width": 1, "height": 1 },
+    "blockz:gloves_2": { "width": 2, "height": 2 },
+    "blockz:gloves": { "width": 1, "height": 1 },
+
+    "minecraft:apple": { "width": 1, "height": 1 },
+    "minecraft:bread": { "width": 1, "height": 1 },
+    "minecraft:cooked_beef": { "width": 1, "height": 1 },
+    "minecraft:potion": { "width": 1, "height": 2 },
+    "minecraft:glass_bottle": { "width": 1, "height": 2 },
+    "minecraft:milk_bucket": { "width": 2, "height": 2 },
+    "minecraft:water_bucket": { "width": 2, "height": 2 },
+    "minecraft:lava_bucket": { "width": 2, "height": 2 },
+
+    "minecraft:bow": { "width": 3, "height": 2 },
+    "minecraft:crossbow": { "width": 3, "height": 2 },
+    "minecraft:trident": { "width": 5, "height": 1 },
+
+    "minecraft:wooden_axe": { "width": 2, "height": 2 },
+    "minecraft:stone_axe": { "width": 2, "height": 2 },
+    "minecraft:iron_axe": { "width": 2, "height": 2 },
+    "minecraft:golden_axe": { "width": 2, "height": 2 },
+    "minecraft:diamond_axe": { "width": 2, "height": 2 },
+    "minecraft:netherite_axe": { "width": 2, "height": 2 },
+
+    "minecraft:wooden_pickaxe": { "width": 3, "height": 2 },
+    "minecraft:stone_pickaxe": { "width": 3, "height": 2 },
+    "minecraft:iron_pickaxe": { "width": 3, "height": 2 },
+    "minecraft:golden_pickaxe": { "width": 3, "height": 2 },
+    "minecraft:diamond_pickaxe": { "width": 3, "height": 2 },
+    "minecraft:netherite_pickaxe": { "width": 3, "height": 2 },
+
+    "minecraft:wooden_shovel": { "width": 3, "height": 1 },
+    "minecraft:stone_shovel": { "width": 3, "height": 1 },
+    "minecraft:iron_shovel": { "width": 3, "height": 1 },
+    "minecraft:golden_shovel": { "width": 3, "height": 1 },
+    "minecraft:diamond_shovel": { "width": 3, "height": 1 },
+    "minecraft:netherite_shovel": { "width": 3, "height": 1 },
+
+    "minecraft:wooden_sword": { "width": 3, "height": 1 },
+    "minecraft:stone_sword": { "width": 3, "height": 1 },
+    "minecraft:iron_sword": { "width": 3, "height": 1 },
+    "minecraft:golden_sword": { "width": 3, "height": 1 },
+    "minecraft:diamond_sword": { "width": 3, "height": 1 },
+    "minecraft:netherite_sword": { "width": 3, "height": 1 },
+
+    "minecraft:wooden_hoe": { "width": 3, "height": 2 },
+    "minecraft:stone_hoe": { "width": 3, "height": 2 },
+    "minecraft:iron_hoe": { "width": 3, "height": 2 },
+    "minecraft:golden_hoe": { "width": 3, "height": 2 },
+    "minecraft:diamond_hoe": { "width": 3, "height": 2 },
+    "minecraft:netherite_hoe": { "width": 3, "height": 2 },
+
+    "minecraft:shield": { "width": 2, "height": 2 },
+
+    "examplemod:example_chestplate": { "width": 3, "height": 3, "cap_width": 4, "cap_height": 3 }
+  },
+  "nbt_items": [
+    {
+      "id": "tacz:modern_kinetic_gun",
+      "nbt_key": "GunId",
+      "nbt_value": "tacz:ai_awp",
+      "width": 5,
+      "height": 2
+    },
+    {
+      "id": "tacz:modern_kinetic_gun",
+      "nbt_key": "GunId",
+      "nbt_value": "tacz:glock_17",
+      "width": 3,
+      "height": 2
+    }
+  ]
+}
