@@ -26,6 +26,7 @@ public class ItemSizeManager {
     private static final Map<Item, ItemSize> SIZES = new ConcurrentHashMap<>();
     private static final Map<Item, Integer> CUSTOM_SLOTS = new ConcurrentHashMap<>();
     private static final Map<Item, Integer> CUSTOM_CAP_WIDTH = new ConcurrentHashMap<>();
+    private static final Map<Item, Integer> GRID_COLORS = new ConcurrentHashMap<>();
     private static final java.util.List<NbtRule> NBT_RULES = new java.util.concurrent.CopyOnWriteArrayList<>();
     private static final String ROTATED_TAG = "blockz_rotated";
     private static volatile Boolean SYNCED_GRID_ENABLED = null;
@@ -114,6 +115,10 @@ public class ItemSizeManager {
         CUSTOM_CAP_WIDTH.put(item, width);
     }
 
+    public static void registerGridColor(Item item, int argbColor) {
+        GRID_COLORS.put(item, argbColor);
+    }
+
     public static int getCapacityCols(ItemStack stack, int defaultCols) {
         if (stack.isEmpty()) return defaultCols;
         Integer w = CUSTOM_CAP_WIDTH.get(stack.getItem());
@@ -129,12 +134,18 @@ public class ItemSizeManager {
         return cfg && (synced == null ? true : synced);
     }
 
+    public static Integer getGridColor(ItemStack stack) {
+        if (stack.isEmpty()) return null;
+        return GRID_COLORS.get(stack.getItem());
+    }
+
     public static void loadCustomSizes() {
         // 清理旧数据，准备重新加载
         SIZES.clear();
         CUSTOM_SLOTS.clear();
         CUSTOM_CAP_WIDTH.clear();
         NBT_RULES.clear();
+        GRID_COLORS.clear();
         
         // 1. 注册硬编码的默认值
         registerDefaults();
@@ -169,6 +180,12 @@ public class ItemSizeManager {
                     int capH = obj.has("cap_height") ? obj.get("cap_height").getAsInt() : -1;
                     if (capW > 0 && capH > 0) {
                         registerCapacityShape(item, capW, capH);
+                    }
+                    if (obj.has("grid_color")) {
+                        Integer color = parseColor(obj.get("grid_color"));
+                        if (color != null) {
+                            registerGridColor(item, color);
+                        }
                     }
                 }
             }
@@ -240,16 +257,15 @@ public class ItemSizeManager {
         registerSize(ModItems.SHOES_2.get(), 2, 2);
         registerSize(ModItems.SHOES_3.get(), 2, 2);
         
-        // 手套 (1x1 或 2x1)
-        registerSize(ModItems.GLOVES_2.get(), 2, 2); // 假设手套也占 2x2
+        // 手套与护理物品
+        registerSize(ModItems.GLOVES_2.get(), 2, 2);
+        registerSize(ModItems.BANDAGE.get(), 1, 1);
+        registerSize(ModItems.SPLINT.get(), 1, 2);
+        registerSize(ModItems.RAGS.get(), 1, 1);
+        registerSize(ModItems.MORPHINE_SYRINGE.get(), 1, 2);
+        registerSize(ModItems.CODEINE_PILLS.get(), 1, 1);
 
         // --- 原版物品尺寸 (DayZ 风格) ---
-        // 食物和饮料
-        registerSize(Items.APPLE, 1, 1);
-        registerSize(Items.BREAD, 1, 1);
-        registerSize(Items.COOKED_BEEF, 1, 1);
-        registerSize(Items.POTION, 1, 2); // 药水瓶高
-        registerSize(Items.GLASS_BOTTLE, 1, 2);
         registerSize(Items.MILK_BUCKET, 2, 2);
         registerSize(Items.WATER_BUCKET, 2, 2);
         registerSize(Items.LAVA_BUCKET, 2, 2);
@@ -296,6 +312,33 @@ public class ItemSizeManager {
         registerSize(Items.NETHERITE_HOE, 3, 2);
 
         registerSize(Items.SHIELD, 2, 2);
+    }
+
+    private static Integer parseColor(JsonElement element) {
+        try {
+            if (element == null || element.isJsonNull()) return null;
+            if (element.isJsonPrimitive()) {
+                var prim = element.getAsJsonPrimitive();
+                if (prim.isNumber()) {
+                    return prim.getAsInt();
+                }
+                if (prim.isString()) {
+                    String raw = prim.getAsString().trim();
+                    if (raw.isEmpty()) return null;
+                    if (raw.startsWith("#")) {
+                        raw = raw.substring(1);
+                    } else if (raw.startsWith("0x") || raw.startsWith("0X")) {
+                        raw = raw.substring(2);
+                    }
+                    long value = Long.parseUnsignedLong(raw, 16);
+                    if (raw.length() <= 6) {
+                        value |= 0xFF000000L;
+                    }
+                    return (int)value;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     private static void ensureConfigFile(Path configDir, Path filePath) {

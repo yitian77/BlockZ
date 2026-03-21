@@ -2,6 +2,7 @@ package com.yitianys.BlockZ.client.event;
 
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.client.ClientSettings;
+import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.OpenDayZMenuC2S;
@@ -16,6 +17,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.InteractionResult;
 import com.yitianys.BlockZ.network.LootPickupC2S;
@@ -37,7 +39,7 @@ public class ClientEvents {
 
     @SubscribeEvent
     public static void onRenderGuiOverlayPre(RenderGuiOverlayEvent.Pre event) {
-        if (ClientSettings.dayzEnabled) {
+        if (ClientSettings.dayzEnabled && BlockZConfigs.showDayzHud.get()) {
             // 隐藏原版快捷栏、经验条、生命、饥饿等，以及手持物品名称
             if (event.getOverlay().id().equals(VanillaGuiOverlay.HOTBAR.id()) ||
                 event.getOverlay().id().equals(VanillaGuiOverlay.EXPERIENCE_BAR.id()) ||
@@ -45,6 +47,7 @@ public class ClientEvents {
                 event.getOverlay().id().equals(VanillaGuiOverlay.PLAYER_HEALTH.id()) ||
                 event.getOverlay().id().equals(VanillaGuiOverlay.ARMOR_LEVEL.id()) ||
                 event.getOverlay().id().equals(VanillaGuiOverlay.ITEM_NAME.id()) ||
+                event.getOverlay().id().equals(VanillaGuiOverlay.POTION_ICONS.id()) ||
                 event.getOverlay().id().getNamespace().equals("thirst")) {
                 event.setCanceled(true);
             }
@@ -99,6 +102,26 @@ public class ClientEvents {
         return lower.contains("arclight") || lower.contains("bukkit");
     }
 
+    private static boolean shouldSkipDayZOverride(AbstractContainerScreen<?> screen) {
+        // TaCZ 等带自定义按钮/逻辑的工作台界面不适合转换为 DayZ UI，直接放行原界面
+        try {
+            if (screen.getMenu() != null) {
+                var key = ForgeRegistries.MENU_TYPES.getKey(screen.getMenu().getType());
+                if (key != null && "tacz".equals(key.getNamespace())) {
+                    return true;
+                }
+                String menuName = screen.getMenu().getClass().getName().toLowerCase(Locale.ROOT);
+                if (menuName.contains("tacz")) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        String screenName = screen.getClass().getName().toLowerCase(Locale.ROOT);
+        return screenName.contains("tacz");
+    }
+
     @SubscribeEvent
     public static void onScreenOpening(ScreenEvent.Opening event) {
         if (event.getScreen() instanceof InventoryScreen) {
@@ -117,6 +140,9 @@ public class ClientEvents {
             }
         } else if (event.getScreen() instanceof AbstractContainerScreen<?> containerScreen) {
             if (ClientSettings.dayzEnabled) {
+                if (shouldSkipDayZOverride(containerScreen)) {
+                    return;
+                }
                 if (event.getScreen() instanceof com.yitianys.BlockZ.client.gui.DayZInventoryScreen) return;
                 if (event.getScreen() instanceof com.yitianys.BlockZ.client.gui.DayZChestScreen) return;
 
@@ -193,7 +219,9 @@ public class ClientEvents {
         Entity entity = InventoryUtils.getTargetedItemEntity(mc.player, 4.0); // 4 blocks reach
         if (entity != null) {
             NetworkHandler.CHANNEL.sendToServer(new LootPickupC2S(entity.getId()));
-            event.setCanceled(true);
+            if (event.isCancelable()) {
+                event.setCanceled(true);
+            }
             event.setCancellationResult(InteractionResult.SUCCESS);
             if (event instanceof PlayerInteractEvent.RightClickBlock blockEvent) {
                 blockEvent.setUseBlock(net.minecraftforge.eventbus.api.Event.Result.DENY);

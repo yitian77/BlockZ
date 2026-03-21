@@ -14,6 +14,14 @@ public class BlockZConfigs {
     public static ForgeConfigSpec.BooleanValue enableGridSystem;
     public static ForgeConfigSpec.DoubleValue uiScale;
     public static ForgeConfigSpec.BooleanValue allowPlayerToggleDayz;
+    public static ForgeConfigSpec.BooleanValue showDayzHud;
+    public static ForgeConfigSpec.BooleanValue showDayzToggleChatHint;
+    public static ForgeConfigSpec.BooleanValue enableNursingSystem;
+    public static ForgeConfigSpec.BooleanValue enableBleeding;
+    public static ForgeConfigSpec.BooleanValue enableBrokenLegs;
+    public static ForgeConfigSpec.DoubleValue baseBleedingChance;
+    public static ForgeConfigSpec.DoubleValue brokenLegChanceMultiplier;
+    public static ForgeConfigSpec.DoubleValue brokenLegMaxChance;
     public static ForgeConfigSpec.BooleanValue enableVanillaBackpackLock;
     public static ForgeConfigSpec.IntValue initialPocketSlots;
 
@@ -40,6 +48,14 @@ public class BlockZConfigs {
         gridRows = b.comment("网格行数 / Grid rows").defineInRange("grid.rows", 4, 1, 20);
         uiScale = b.comment("UI 缩放 / UI scale").defineInRange("ui.scale", 1.0, 0.5, 2.0);
         allowPlayerToggleDayz = b.comment("允许玩家切换 DayZ 界面 / Allow player toggle").define("ui.allow_player_toggle", true);
+        showDayzHud = b.comment("显示 DayZ HUD 覆盖层 / Show DayZ HUD overlay").define("ui.show_dayz_hud", true);
+        showDayzToggleChatHint = b.comment("显示 DayZ 切换提示 / Show DayZ toggle chat hint").define("ui.show_dayz_toggle_hint", true);
+        enableNursingSystem = b.comment("是否启用护理系统（伤口/骨折/绷带等） / Enable nursing system").define("ui.enable_nursing_system", true);
+        enableBleeding = b.comment("是否启用流血效果 / Enable bleeding").define("ui.enable_bleeding", true);
+        enableBrokenLegs = b.comment("是否启用骨折效果 / Enable broken legs").define("ui.enable_broken_legs", true);
+        baseBleedingChance = b.comment("基础流血概率（与伤害值相乘） / Base bleeding chance").defineInRange("ui.base_bleeding_chance", 0.1D, 0.0D, 1.0D);
+        brokenLegChanceMultiplier = b.comment("骨折概率倍率（fallDistance/maxFallDistance * multiplier） / Broken leg chance multiplier").defineInRange("ui.broken_leg_chance_multiplier", 0.35D, 0.0D, 1.0D);
+        brokenLegMaxChance = b.comment("骨折概率上限 / Broken leg max chance").defineInRange("ui.broken_leg_max_chance", 0.85D, 0.0D, 1.0D);
         enableVanillaBackpackLock = b.comment("是否启用原版背包锁定机制 / Enable vanilla backpack locking").define("ui.enable_vanilla_lock", true);
         initialPocketSlots = b.comment("初始口袋格子数 (无背包时) / Initial pocket slots (without backpack)").defineInRange("ui.initial_pocket_slots", 5, 0, 27);
         b.pop();

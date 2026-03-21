@@ -58,4 +58,17 @@ public class ModCreativeTabs {
                 output.accept(ModItems.GLOVES_2.get());
             })
             .build());
+
+    public static final RegistryObject<CreativeModeTab> NURSING_TAB = CREATIVE_MODE_TABS.register("nursing_tab",
+        () -> CreativeModeTab.builder()
+            .icon(() -> new ItemStack(ModItems.BANDAGE.get()))
+            .title(Component.translatable("creativetab.blockz_nursing_tab"))
+            .displayItems((parameters, output) -> {
+                output.accept(ModItems.BANDAGE.get());
+                output.accept(ModItems.SPLINT.get());
+                output.accept(ModItems.RAGS.get());
+                output.accept(ModItems.MORPHINE_SYRINGE.get());
+                output.accept(ModItems.CODEINE_PILLS.get());
+            })
+            .build());
 }

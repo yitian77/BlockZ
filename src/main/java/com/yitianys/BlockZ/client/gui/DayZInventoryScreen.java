@@ -40,6 +40,11 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
    private boolean clickStartedInVicinitySlot;
    private static final int VIEW_HEIGHT = 188;
    private static final ResourceLocation LOCK_ICON = new ResourceLocation("blockz", "textures/gui/inventory/lock.png");
+   private static final int DEFAULT_GRID_FILL = 0x60808080;
+   private static final int DEFAULT_GRID_OUTLINE = 0xFF5A5A5A;
+   private static final int CUSTOM_GRID_ALPHA = 0x60;
+   private static final int CUSTOM_PREVIEW_ALPHA = 0x20;
+   private static final int PREVIEW_FAIL_COLOR = 0x80E03C3C;
    private static Field SLOT_X_FIELD;
    private static Field SLOT_Y_FIELD;
 
@@ -47,6 +52,37 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
       super(menu, inv, title);
       this.imageWidth = UIConstants.WIDTH;
       this.imageHeight = 200;
+   }
+
+   private int getGridFillColor(ItemStack stack, int defaultColor) {
+      Integer custom = ItemSizeManager.getGridColor(stack);
+      if (custom == null) {
+         return defaultColor;
+      }
+      return applyAlpha(custom, CUSTOM_GRID_ALPHA);
+   }
+
+   private int getGridOutlineColor(ItemStack stack, int defaultColor) {
+      Integer custom = ItemSizeManager.getGridColor(stack);
+      if (custom == null) {
+         return defaultColor;
+      }
+      return custom | 0xFF000000;
+   }
+
+   private int getPreviewFillColor(ItemStack stack, boolean fits) {
+      if (!fits) {
+         return PREVIEW_FAIL_COLOR;
+      }
+      Integer custom = ItemSizeManager.getGridColor(stack);
+      if (custom == null) {
+         return DEFAULT_GRID_FILL;
+      }
+      return applyAlpha(custom, CUSTOM_PREVIEW_ALPHA);
+   }
+
+   private int applyAlpha(int color, int alpha) {
+      return (color & 0x00FFFFFF) | ((alpha & 0xFF) << 24);
    }
 
    protected void init() {
@@ -204,6 +240,17 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
 
                this.enableScissor(slotX, sY, 18, sH);
                isScissored = true;
+            }
+
+            if (slot instanceof TetrisSlot && slot.hasItem()) {
+               ItemStack stack = slot.getItem();
+               ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
+               if (size.width() > 1 || size.height() > 1) {
+                  if (isScissored) {
+                     RenderSystem.disableScissor();
+                  }
+                  continue;
+               }
             }
 
             sY = slot.hasItem() ? 822083583 : 285212671;
@@ -423,7 +470,7 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
       if (slotId >= 0 && slotId < vSlots) {
          if (((DayZInventoryMenu)this.menu).getActiveContainer() instanceof CorpseEntity) {
             if (slotId == 4) {
-               return UITextures.SLOT_HEADGEAR;
+               return UITextures.SLOT_HEADWEAR;
             }
 
             if (slotId == 7) {
@@ -461,7 +508,7 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
 
          return null;
       } else if (slotId == vSlots + 0) {
-         return UITextures.SLOT_HEADGEAR;
+         return UITextures.SLOT_HEADWEAR;
       } else if (slotId == vSlots + 1) {
          return UITextures.SLOT_SHIRT;
       } else if (slotId == vSlots + 2) {
@@ -523,8 +570,10 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
                int slotY = this.topPos + slot.y - 1;
                int pixelW = size.width() * 18;
                int pixelH = size.height() * 18;
-               graphics.fill(slotX + 1, slotY + 1, slotX + pixelW - 1, slotY + pixelH - 1, 1627389866);
-               graphics.renderOutline(slotX, slotY, pixelW, pixelH, -1593835606);
+               int fillColor = getGridFillColor(stack, 0x60808080);
+               int outlineColor = getGridOutlineColor(stack, 0xFF5A5A5A);
+               graphics.fill(slotX, slotY, slotX + pixelW, slotY + pixelH, fillColor);
+               graphics.renderOutline(slotX, slotY, pixelW, pixelH, outlineColor);
             }
          }
       }
@@ -572,11 +621,11 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
          int slotY = this.topPos + this.hoveredSlot.y - 1;
          int pixelW = previewW * 18;
          int pixelH = previewH * 18;
-         int color = fits ? -2141847723 : -2130750123;
+         int color = getPreviewFillColor(carried, fits);
          graphics.pose().pushPose();
          graphics.pose().translate(0.0F, 0.0F, 250.0F);
          graphics.renderOutline(slotX, slotY, pixelW, pixelH, color | -16777216);
-         graphics.fill(slotX + 1, slotY + 1, slotX + pixelW - 1, slotY + pixelH - 1, color);
+         graphics.fill(slotX, slotY, slotX + pixelW, slotY + pixelH, color);
          graphics.pose().popPose();
       }
    }

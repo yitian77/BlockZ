@@ -5,6 +5,7 @@ import com.mojang.math.Axis;
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.capability.PlayerBackpack;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
+import com.yitianys.BlockZ.item.BackpackItem;
 import com.yitianys.BlockZ.item.ClothingItem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.PlayerModel;
@@ -41,6 +42,9 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
     private final HumanoidModel<AbstractClientPlayer> legacyModel;
     private final HumanoidModel<AbstractClientPlayer> maskModel;
 
+    public record OuterLayerState(boolean hat, boolean jacket, boolean leftSleeve, boolean rightSleeve, boolean leftPants, boolean rightPants) {
+    }
+
     public ClothingLayer(RenderLayerParent<AbstractClientPlayer, PlayerModel<AbstractClientPlayer>> renderer) {
         super(renderer);
         // 使用 HumanoidModel 的标准 Mesh 定义，以实现“模仿”标准规范
@@ -55,46 +59,111 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
     public void render(PoseStack poseStack, MultiBufferSource buffer, int packedLight, AbstractClientPlayer player, float limbSwing, float limbSwingAmount, float partialTick, float ageInTicks, float netHeadYaw, float headPitch) {
         if (player.isInvisible()) return;
 
-        // 1. 渲染基础衣服 (来自原生装备栏)
-        renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.CHEST, ClothingItem.ClothingType.SHIRT);
-        renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.LEGS, ClothingItem.ClothingType.PANTS);
-        renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.FEET, ClothingItem.ClothingType.SHOES);
-        renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.HEAD, ClothingItem.ClothingType.HAT);
+        PlayerModel<AbstractClientPlayer> parentModel = this.getParentModel();
+        OuterLayerState previousState = captureOuterLayerState(parentModel);
+        applyOuterLayerVisibility(player, parentModel);
 
-        // 2. 渲染 Capability 装备 (背心、手套、面具、背包)
-        player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-            ItemStackHandler inventory = cap.getInventory();
-            
-            // Render Backpack (3D Model)
-            ItemStack backpack = inventory.getStackInSlot(PlayerBackpack.SLOT_BACKPACK);
-            if (!backpack.isEmpty()) {
-                render3DClothing(poseStack, buffer, packedLight, player, backpack, ClothingItem.ClothingType.BACKPACK);
-            }
+        try {
+            // 1. 渲染基础衣服 (来自原生装备栏)
+            renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.CHEST, ClothingItem.ClothingType.SHIRT);
+            renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.LEGS, ClothingItem.ClothingType.PANTS);
+            renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.FEET, ClothingItem.ClothingType.SHOES);
+            renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.HEAD, ClothingItem.ClothingType.HAT);
 
-            // Render Hat or Mask in MASK slot
-            ItemStack maskSlotStack = inventory.getStackInSlot(PlayerBackpack.SLOT_MASK);
-            if (!maskSlotStack.isEmpty()) {
-                if (maskSlotStack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.HAT) {
-                    // 如果是帽子，使用 3D 渲染
-                    render3DClothing(poseStack, buffer, packedLight, player, maskSlotStack, ClothingItem.ClothingType.HAT);
-                } else {
-                    // 否则作为面部装备，使用 2D 贴图渲染
-                    render2DClothing(poseStack, buffer, packedLight, player, maskSlotStack);
+            // 2. 渲染 Capability 装备 (背心、手套、面具、背包)
+            player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
+                ItemStackHandler inventory = cap.getInventory();
+                
+                // Render Backpack (3D Model)
+                ItemStack backpack = inventory.getStackInSlot(PlayerBackpack.SLOT_BACKPACK);
+                if (isManagedBackpack(backpack)) {
+                    render3DClothing(poseStack, buffer, packedLight, player, backpack, ClothingItem.ClothingType.BACKPACK);
                 }
-            }
 
-            // Render Vest (3D Model)
-            ItemStack vest = inventory.getStackInSlot(PlayerBackpack.SLOT_VEST);
-            if (!vest.isEmpty()) {
-                render3DClothing(poseStack, buffer, packedLight, player, vest, ClothingItem.ClothingType.VEST);
-            }
+                // Render Hat or Mask in MASK slot
+                ItemStack maskSlotStack = inventory.getStackInSlot(PlayerBackpack.SLOT_MASK);
+                if (!maskSlotStack.isEmpty()) {
+                    if (maskSlotStack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.HAT) {
+                        render3DClothing(poseStack, buffer, packedLight, player, maskSlotStack, ClothingItem.ClothingType.HAT);
+                    } else {
+                        render2DClothing(poseStack, buffer, packedLight, player, maskSlotStack);
+                    }
+                }
 
-            // Render Gloves (2D Texture)
-            ItemStack gloves = inventory.getStackInSlot(PlayerBackpack.SLOT_GLOVES);
-            if (!gloves.isEmpty()) {
-                render2DClothing(poseStack, buffer, packedLight, player, gloves);
-            }
-        });
+                // Render Vest (3D Model)
+                ItemStack vest = inventory.getStackInSlot(PlayerBackpack.SLOT_VEST);
+                if (hasClothingType(vest, ClothingItem.ClothingType.VEST)) {
+                    render3DClothing(poseStack, buffer, packedLight, player, vest, ClothingItem.ClothingType.VEST);
+                }
+
+                // Render Gloves (2D Texture)
+                ItemStack gloves = inventory.getStackInSlot(PlayerBackpack.SLOT_GLOVES);
+                if (!gloves.isEmpty()) {
+                    render2DClothing(poseStack, buffer, packedLight, player, gloves);
+                }
+            });
+        } finally {
+            restoreOuterLayerState(parentModel, previousState);
+        }
+    }
+
+    public static OuterLayerState captureOuterLayerState(PlayerModel<AbstractClientPlayer> model) {
+        return new OuterLayerState(model.hat.visible, model.jacket.visible, model.leftSleeve.visible, model.rightSleeve.visible, model.leftPants.visible, model.rightPants.visible);
+    }
+
+    public static void restoreOuterLayerState(PlayerModel<AbstractClientPlayer> model, OuterLayerState state) {
+        model.hat.visible = state.hat();
+        model.jacket.visible = state.jacket();
+        model.leftSleeve.visible = state.leftSleeve();
+        model.rightSleeve.visible = state.rightSleeve();
+        model.leftPants.visible = state.leftPants();
+        model.rightPants.visible = state.rightPants();
+    }
+
+    public static void applyOuterLayerVisibility(AbstractClientPlayer player, PlayerModel<AbstractClientPlayer> parentModel) {
+        boolean wearingHat = hasClothing(player, EquipmentSlot.HEAD, ClothingItem.ClothingType.HAT) || hasCapabilityClothing(player, PlayerBackpack.SLOT_MASK, ClothingItem.ClothingType.HAT);
+        boolean wearingMask = hasClothing(player, EquipmentSlot.HEAD, ClothingItem.ClothingType.MASK) || hasCapabilityClothing(player, PlayerBackpack.SLOT_MASK, ClothingItem.ClothingType.MASK);
+        boolean wearingShirt = hasClothing(player, EquipmentSlot.CHEST, ClothingItem.ClothingType.SHIRT);
+        boolean wearingVest = hasCapabilityClothing(player, PlayerBackpack.SLOT_VEST, ClothingItem.ClothingType.VEST);
+        boolean wearingPants = hasClothing(player, EquipmentSlot.LEGS, ClothingItem.ClothingType.PANTS);
+        boolean wearingShoes = hasClothing(player, EquipmentSlot.FEET, ClothingItem.ClothingType.SHOES);
+        boolean wearingGloves = hasCapabilityClothing(player, PlayerBackpack.SLOT_GLOVES, ClothingItem.ClothingType.GLOVES);
+
+        if (wearingHat || wearingMask) {
+            parentModel.hat.visible = false;
+        }
+        if (wearingShirt || wearingVest) {
+            parentModel.jacket.visible = false;
+        }
+        if (wearingShirt || wearingGloves) {
+            parentModel.leftSleeve.visible = false;
+            parentModel.rightSleeve.visible = false;
+        }
+        if (wearingPants || wearingShoes) {
+            parentModel.leftPants.visible = false;
+            parentModel.rightPants.visible = false;
+        }
+    }
+
+    private static boolean hasClothing(AbstractClientPlayer player, EquipmentSlot slot, ClothingItem.ClothingType type) {
+        ItemStack stack = player.getItemBySlot(slot);
+        return stack.getItem() instanceof ClothingItem clothing && clothing.getType() == type;
+    }
+
+    private static boolean hasCapabilityClothing(AbstractClientPlayer player, int slotIndex, ClothingItem.ClothingType type) {
+        return player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
+                .map(cap -> {
+                    ItemStack stack = cap.getInventory().getStackInSlot(slotIndex);
+                    return stack.getItem() instanceof ClothingItem clothing && clothing.getType() == type;
+                }).orElse(false);
+    }
+
+    private boolean hasClothingType(ItemStack stack, ClothingItem.ClothingType type) {
+        return stack.getItem() instanceof ClothingItem clothing && clothing.getType() == type;
+    }
+
+    private boolean isManagedBackpack(ItemStack stack) {
+        return stack.getItem() instanceof BackpackItem;
     }
 
     private void renderClothing(PoseStack poseStack, MultiBufferSource buffer, int packedLight, AbstractClientPlayer player, ItemStack stack) {
@@ -236,7 +305,10 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
 
     private void renderTextureOnPlayer(PoseStack poseStack, MultiBufferSource buffer, int packedLight, AbstractClientPlayer player, ResourceLocation texture, ClothingItem.ClothingType type) {
         PlayerModel<AbstractClientPlayer> parent = this.getParentModel();
-        HumanoidModel<AbstractClientPlayer> modelToUse = (type == ClothingItem.ClothingType.MASK) ? maskModel : legacyModel;
+        HumanoidModel<AbstractClientPlayer> modelToUse = switch (type) {
+            case MASK -> maskModel;
+            default -> legacyModel;
+        };
         
         // 1. 同步姿态：直接调用 HumanoidModel 的标准姿态设置，确保“模仿”原生行为
         modelToUse.attackTime = parent.attackTime;
@@ -256,6 +328,13 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
         modelToUse.leftLeg.copyFrom(parent.leftLeg);
 
         // 2. 设置可见性：根据类型决定渲染哪些部位，实现“直接套用”逻辑
+        boolean prevHead = modelToUse.head.visible;
+        boolean prevHat = modelToUse.hat.visible;
+        boolean prevBody = modelToUse.body.visible;
+        boolean prevRightArm = modelToUse.rightArm.visible;
+        boolean prevLeftArm = modelToUse.leftArm.visible;
+        boolean prevRightLeg = modelToUse.rightLeg.visible;
+        boolean prevLeftLeg = modelToUse.leftLeg.visible;
         modelToUse.setAllVisible(false);
         switch (type) {
             case HAT:
@@ -267,12 +346,12 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
                 modelToUse.hat.visible = true; // 有些 mask 可能在 hat 层
                 break;
             case VEST:
+                modelToUse.body.visible = true;
+                break;
             case SHIRT:
                 modelToUse.body.visible = true;
-                if (type == ClothingItem.ClothingType.SHIRT) {
-                    modelToUse.rightArm.visible = true;
-                    modelToUse.leftArm.visible = true;
-                }
+                modelToUse.rightArm.visible = true;
+                modelToUse.leftArm.visible = true;
                 break;
             case GLOVES:
                 modelToUse.rightArm.visible = true;
@@ -300,8 +379,8 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
         switch (type) {
             case HAT: scale = 1.0F; break;
             case MASK: scale = 1.001F; break;
-            case SHIRT: scale = 1.002F; break;
-            case PANTS: scale = 1.003F; break;
+            case SHIRT: scale = 1.001F; break;
+            case PANTS: scale = 1.001F; break;
             case SHOES: scale = 1.004F; break;
             case GLOVES: scale = 1.005F; break;
             case VEST: scale = 1.006F; break;
@@ -315,5 +394,13 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
         modelToUse.renderToBuffer(poseStack, vertexConsumer, packedLight, overlay, 1.0F, 1.0F, 1.0F, 1.0F);
         
         poseStack.popPose();
+
+        modelToUse.head.visible = prevHead;
+        modelToUse.hat.visible = prevHat;
+        modelToUse.body.visible = prevBody;
+        modelToUse.rightArm.visible = prevRightArm;
+        modelToUse.leftArm.visible = prevLeftArm;
+        modelToUse.rightLeg.visible = prevRightLeg;
+        modelToUse.leftLeg.visible = prevLeftLeg;
     }
 }

@@ -6,8 +6,8 @@ import net.minecraft.resources.ResourceLocation;
 public class UITextures {
     public static final ResourceLocation SLOT_HEADWEAR = new ResourceLocation("blockz", "textures/gui/inventory/slot_headwear.png");
     public static final ResourceLocation SLOT_HEADGEAR = new ResourceLocation("blockz", "textures/gui/inventory/slot_headgear.png");
-    public static final ResourceLocation SLOT_MASK = new ResourceLocation("blockz", "textures/gui/inventory/slot_headgear.png");
-    public static final ResourceLocation SLOT_GLASSES = new ResourceLocation("blockz", "textures/gui/inventory/slot_headwear.png");
+    public static final ResourceLocation SLOT_MASK = SLOT_HEADGEAR;
+    public static final ResourceLocation SLOT_GLASSES = SLOT_HEADWEAR;
     public static final ResourceLocation SLOT_VEST = new ResourceLocation("blockz", "textures/gui/inventory/slot_vest.png");
     public static final ResourceLocation SLOT_SHIRT = new ResourceLocation("blockz", "textures/gui/inventory/slot_shirt.png");
     public static final ResourceLocation SLOT_PANTS = new ResourceLocation("blockz", "textures/gui/inventory/slot_pants.png");
@@ -27,4 +27,7 @@ public class UITextures {
     public static final ResourceLocation HUD_THIRST_VALUE = new ResourceLocation("blockz", "textures/gui/hub/thirstvalue.png");
     public static final ResourceLocation HUD_ARMOR_OUTLINE = new ResourceLocation("blockz", "textures/gui/hub/armoroutline.png");
     public static final ResourceLocation HUD_ARMOR_VALUE = new ResourceLocation("blockz", "textures/gui/hub/armorvalue.png");
+    public static final ResourceLocation HUD_WOUND = new ResourceLocation("blockz", "textures/gui/hub/wound.png");
+    public static final ResourceLocation HUD_FRACTURES = new ResourceLocation("blockz", "textures/gui/hub/fractures.png");
+    public static final ResourceLocation HUD_MEDICINE = new ResourceLocation("blockz", "textures/gui/hub/medicine.png");
 }

@@ -8,6 +8,7 @@
     "  \"height\": 物品在背包中的高度 (必填, 整数)",
     "  \"cap_width\": 容量网格宽度 (必填, 整数, 仅对容器有效)",
     "  \"cap_height\": 容量网格高度 (必填, 整数, 仅对容器有效)",
+    "  \"grid_color\": 占格背景颜色 (可选, 十六进制或整数, 默认继承系统颜色)",
     "}",
     "",
     "容量说明:",
@@ -19,7 +20,7 @@
     "\"blockz:backpack_example\": { \"width\": 3, \"height\": 3, \"cap_width\": 2, \"cap_height\": 2 }"
   ],
   "items": {
-    "blockz:backpack_coyote": { "width": 4, "height": 4, "cap_width": 6, "cap_height": 4 },
+    "blockz:backpack_coyote": { "width": 4, "height": 4, "cap_width": 6, "cap_height": 4, "grid_color": "#4B7C42" },
     "blockz:backpack_alice": { "width": 4, "height": 4, "cap_width": 5, "cap_height": 4 },
     "blockz:backpack_czech": { "width": 3, "height": 3, "cap_width": 4, "cap_height": 4 },
     "blockz:backpack_czechpouch": { "width": 2, "height": 2, "cap_width": 3, "cap_height": 2 },

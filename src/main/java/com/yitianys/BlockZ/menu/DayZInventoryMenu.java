@@ -4,6 +4,7 @@ import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.capability.PlayerBackpack;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
 import com.yitianys.BlockZ.client.gui.UIConstants;
+import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.entity.CorpseEntity;
 import com.yitianys.BlockZ.init.ModItems;
@@ -401,6 +402,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     private int lastVestCap = 0;
     private int lastShirtCap = 0;
     private int lastPantsCap = 0;
+    private ItemStack storageBackpackOverride;
+    private ItemStack storageVestOverride;
     
     public boolean isCorpseMode() {
         return this.activeContainer instanceof CorpseEntity;
@@ -694,6 +697,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             }
         }
 
+        if (this.player instanceof ServerPlayer serverPlayer) {
+            CuriosIntegration.importToCapability(serverPlayer);
+        }
+
         // 最后初始化背包内容，确保槽位已添加
         loadBackpackFromItem();
         
@@ -808,17 +815,13 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         }
 
         // 1. Get Capacities
-        ItemStack backpackStack = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK))
-                .orElse(ItemStack.EMPTY);
-        ItemStack vestStack = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST))
-                .orElse(ItemStack.EMPTY);
+        ItemStack backpackStack = getStorageBackpackStack();
+        ItemStack vestStack = getStorageVestStack();
         ItemStack shirtStack = this.player.getInventory().getArmor(2);
         ItemStack pantsStack = this.player.getInventory().getArmor(1);
 
-        int bpCap = BlockZConfigs.getBackpackSlots(backpackStack);
-        int vestCap = BlockZConfigs.getBackpackSlots(vestStack);
+        int bpCap = getStorageSlotCount(backpackStack);
+        int vestCap = getStorageSlotCount(vestStack);
         int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
         int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
 
@@ -1257,6 +1260,11 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
     private int getCapacityColsForItem(ItemStack stack, int maxCols, int cap) {
         if (cap <= 0) return maxCols;
+        int mmCols = getModernMayhemInventoryColumns(stack);
+        if (mmCols > 0) {
+            int cols = Math.min(mmCols, maxCols);
+            return Math.max(1, Math.min(cols, cap));
+        }
         int cols = ItemSizeManager.getCapacityCols(stack, maxCols);
         if (cols <= 0) cols = maxCols;
         if (cols > maxCols) cols = maxCols;
@@ -1767,7 +1775,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         this.addSlot(new SlotItemHandler(capHandler, PlayerBackpack.SLOT_BACKPACK, UIConstants.BACKPACK_EQUIP_X, UIConstants.BACKPACK_EQUIP_Y) {
             @Override
             public boolean mayPlace(ItemStack stack) {
-                return stack.getItem() instanceof BackpackItem || stack.is(BACKPACKS);
+                return stack.getItem() instanceof BackpackItem
+                        || stack.is(BACKPACKS)
+                        || CuriosIntegration.supportsSlot(player, stack, CuriosIntegration.SLOT_BACK);
             }
             @Override public int getMaxStackSize() { return 1; }
             @Override
@@ -1775,9 +1785,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 if (!isLoading) saveBackpackToItem();
                 super.set(stack);
                 if (!isLoading) {
-                    loadBackpackFromItem();
                     syncSlot(PlayerBackpack.SLOT_BACKPACK, stack);
-                    updateSlotPositions();
+                    refreshStorageLayout(stack, null);
                     broadcastChanges();
                 }
             }
@@ -1785,9 +1794,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             public void onTake(Player player, ItemStack stack) {
                 saveBackpackToItem(stack, ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY);
                 super.onTake(player, stack);
-                loadBackpackFromItem();
                 syncSlot(PlayerBackpack.SLOT_BACKPACK, ItemStack.EMPTY);
-                updateSlotPositions();
+                refreshStorageLayout(ItemStack.EMPTY, null);
                 broadcastChanges();
             }
             @Override
@@ -1802,16 +1810,18 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             @Override public int getMaxStackSize() { return 1; }
             @Override
             public boolean mayPlace(ItemStack stack) {
-                return stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.VEST;
+                if (stack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.VEST) {
+                    return true;
+                }
+                return CuriosIntegration.supportsSlot(player, stack, CuriosIntegration.SLOT_BODY);
             }
             @Override
             public void set(ItemStack stack) {
                 if (!isLoading) saveBackpackToItem();
                 super.set(stack);
                 if (!isLoading) {
-                    loadBackpackFromItem();
                     syncSlot(PlayerBackpack.SLOT_VEST, stack);
-                    updateSlotPositions();
+                    refreshStorageLayout(null, stack);
                     broadcastChanges();
                 }
             }
@@ -1819,9 +1829,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             public void onTake(Player player, ItemStack stack) {
                 saveBackpackToItem(ItemStack.EMPTY, stack, ItemStack.EMPTY, ItemStack.EMPTY);
                 super.onTake(player, stack);
-                loadBackpackFromItem();
                 syncSlot(PlayerBackpack.SLOT_VEST, ItemStack.EMPTY);
-                updateSlotPositions();
+                refreshStorageLayout(null, ItemStack.EMPTY);
                 broadcastChanges();
             }
             @Override
@@ -1856,6 +1865,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             @Override
             public boolean mayPlace(ItemStack stack) {
                 if (canEquip(stack, EquipmentSlot.HEAD)) return true;
+                if (CuriosIntegration.supportsSlot(player, stack, CuriosIntegration.SLOT_HEAD)) {
+                    return true;
+                }
                 if (!(stack.getItem() instanceof ClothingItem c)) return false;
                 return c.getType() == ClothingItem.ClothingType.MASK || c.getType() == ClothingItem.ClothingType.HAT;
             }
@@ -1875,6 +1887,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     private void syncSlot(int slotId, ItemStack stack) {
         if (this.player instanceof ServerPlayer serverPlayer) {
             try {
+                CuriosIntegration.syncFromCapability(serverPlayer, slotId, stack);
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer), 
                     new SyncBackpackS2C(slotId, stack));
             } catch (Exception e) {
@@ -1949,12 +1962,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         int bpCap = 0;
         int vestCap = 0;
         if (this.player != null) {
-            bpCap = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                    .map(cap -> BlockZConfigs.getBackpackSlots(cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK)))
-                    .orElse(0);
-            vestCap = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                    .map(cap -> BlockZConfigs.getBackpackSlots(cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST)))
-                    .orElse(0);
+            bpCap = getStorageSlotCount(getStorageBackpackStack());
+            vestCap = getStorageSlotCount(getStorageVestStack());
         }
 
         ItemStack shirt = this.player.getInventory().getArmor(2);
@@ -2020,17 +2029,13 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
     private int getSectionColsForHandlerIndex(int handlerIndex) {
         // 按当前可用容量分段判断所属分区（与 updateSlotPositions 的 offset 划分保持一致）
-        ItemStack backpackStack = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK))
-                .orElse(ItemStack.EMPTY);
-        ItemStack vestStack = this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST))
-                .orElse(ItemStack.EMPTY);
+        ItemStack backpackStack = getStorageBackpackStack();
+        ItemStack vestStack = getStorageVestStack();
         ItemStack shirtStack = this.player.getInventory().getArmor(2);
         ItemStack pantsStack = this.player.getInventory().getArmor(1);
 
-        int bpCap = BlockZConfigs.getBackpackSlots(backpackStack);
-        int vestCap = BlockZConfigs.getBackpackSlots(vestStack);
+        int bpCap = getStorageSlotCount(backpackStack);
+        int vestCap = getStorageSlotCount(vestStack);
         int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
         int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
         int[] safeCaps = clampBackpackCaps(bpCap, vestCap, shirtCap, pantsCap);
@@ -2444,12 +2449,50 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         return !invTag.getList("Items", 10).isEmpty();
     }
 
+    private boolean isModernMayhemStorageNotEmpty(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasTag()) {
+            return false;
+        }
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains("inventory")) {
+            return false;
+        }
+        net.minecraft.nbt.CompoundTag inventoryTag = tag.getCompound("inventory");
+        if (!inventoryTag.contains("Items")) {
+            return false;
+        }
+        return !inventoryTag.getList("Items", 10).isEmpty();
+    }
+
+    private boolean hasBlockZStorage(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        if (isBackpackItemValid(stack)) {
+            return true;
+        }
+        if (stack.getItem() instanceof ClothingItem clothing) {
+            return switch (clothing.getType()) {
+                case VEST, SHIRT, PANTS -> BlockZConfigs.getBackpackSlots(stack) > 0;
+                default -> false;
+            };
+        }
+        return false;
+    }
+
+    private boolean hasAnyStorageContents(ItemStack stack) {
+        return isBackpackNotEmpty(stack) || isModernMayhemStorageNotEmpty(stack);
+    }
+
     private boolean isBackpackItemValid(ItemStack stack) {
         return stack.getItem() instanceof BackpackItem || stack.is(BACKPACKS);
     }
     
-    private boolean isBackpackNested(ItemStack stack) {
-        return isBackpackItemValid(stack) && isBackpackNotEmpty(stack);
+    private boolean isStorageItemWithContents(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        return (hasBlockZStorage(stack) || getModernMayhemInventorySize(stack) > 0) && hasAnyStorageContents(stack);
     }
 
     private void dropClothingItems(Player player, ItemStack clothingStack, int startOffset, int cap) {
@@ -2518,7 +2561,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 this.addSlot(new Slot(inv, 9 + slotIdx, x, y) {
                     @Override
                     public boolean mayPlace(ItemStack stack) {
-                        if (isBackpackNested(stack)) return false; // 禁止套娃
+                        if (isStorageItemWithContents(stack)) return false;
                         return super.mayPlace(stack);
                     }
                 });
@@ -2535,7 +2578,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                             y,
                             UIConstants.INVENTORY_COLS,
                             this::getBackpackCapacity,
-                            this::isBackpackNested
+                            this::isStorageItemWithContents
                     ));
                 }
             }
@@ -2586,8 +2629,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         if (this.player == null) return;
         
         this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-            ItemStack backpackStack = !overrideBackpack.isEmpty() ? overrideBackpack : cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK);
-            ItemStack vestStack = !overrideVest.isEmpty() ? overrideVest : cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST);
+            ItemStack backpackStack = !overrideBackpack.isEmpty() ? overrideBackpack : getStorageBackpackStack();
+            ItemStack vestStack = !overrideVest.isEmpty() ? overrideVest : getStorageVestStack();
             
             ItemStack shirtStack = !overrideShirt.isEmpty() ? overrideShirt : this.player.getInventory().getArmor(2);
             ItemStack pantsStack = !overridePants.isEmpty() ? overridePants : this.player.getInventory().getArmor(1);
@@ -2599,24 +2642,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             // 1. Backpack
             if (lastBackpackCap > 0) {
                 if (!backpackStack.isEmpty()) {
-                    ItemStackHandler bpHandler = new ItemStackHandler(lastBackpackCap);
-                    boolean hasItems = false;
-                    for (int i = 0; i < lastBackpackCap; i++) {
-                        if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                            ItemStack s = this.backpackContentHandler.getStackInSlot(currentOffset + i);
-                            bpHandler.setStackInSlot(i, s);
-                            if (!s.isEmpty()) hasItems = true;
-                        }
-                    }
-                    
-                    if (hasItems) {
-                        backpackStack.getOrCreateTag().put("Inventory", bpHandler.serializeNBT());
-                    } else {
-                        net.minecraft.nbt.CompoundTag tag = backpackStack.getTag();
-                        if (tag != null) {
-                            tag.remove("Inventory");
-                        }
-                    }
+                    saveSectionToItem(backpackStack, currentOffset, lastBackpackCap);
 
                     // Only sync if it's the capability item (not override)
                     if (overrideBackpack.isEmpty()) {
@@ -2630,24 +2656,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             // 2. Vest
             if (lastVestCap > 0) {
                 if (!vestStack.isEmpty()) {
-                    ItemStackHandler vestHandler = new ItemStackHandler(lastVestCap);
-                    boolean hasItems = false;
-                    for (int i = 0; i < lastVestCap; i++) {
-                        if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                            ItemStack s = this.backpackContentHandler.getStackInSlot(currentOffset + i);
-                            vestHandler.setStackInSlot(i, s);
-                            if (!s.isEmpty()) hasItems = true;
-                        }
-                    }
-                    
-                    if (hasItems) {
-                        vestStack.getOrCreateTag().put("Inventory", vestHandler.serializeNBT());
-                    } else {
-                        net.minecraft.nbt.CompoundTag tag = vestStack.getTag();
-                        if (tag != null) {
-                            tag.remove("Inventory");
-                        }
-                    }
+                    saveSectionToItem(vestStack, currentOffset, lastVestCap);
 
                     if (overrideVest.isEmpty()) {
                         cap.getInventory().setStackInSlot(PlayerBackpack.SLOT_VEST, vestStack);
@@ -2713,14 +2722,14 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         if (this.player == null) return;
         this.isLoading = true;
         this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-            ItemStack backpackStack = cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK);
-            ItemStack vestStack = cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST);
+            ItemStack backpackStack = getStorageBackpackStack();
+            ItemStack vestStack = getStorageVestStack();
             
             ItemStack shirtStack = this.player.getInventory().getArmor(2);
             ItemStack pantsStack = this.player.getInventory().getArmor(1);
             
-            int bpCap = BlockZConfigs.getBackpackSlots(backpackStack);
-            int vestCap = BlockZConfigs.getBackpackSlots(vestStack);
+            int bpCap = getStorageSlotCount(backpackStack);
+            int vestCap = getStorageSlotCount(vestStack);
             int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
             int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
 
@@ -2740,26 +2749,14 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             int currentOffset = 0;
             
             // 从背包加载
-            if (bpCap > 0 && backpackStack.hasTag() && backpackStack.getTag().contains("Inventory")) {
-                ItemStackHandler bpHandler = new ItemStackHandler(bpCap);
-                bpHandler.deserializeNBT(backpackStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(bpCap, bpHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                        this.backpackContentHandler.setStackInSlot(currentOffset + i, bpHandler.getStackInSlot(i));
-                    }
-                }
+            if (bpCap > 0) {
+                loadSectionFromItem(backpackStack, currentOffset, bpCap);
             }
             currentOffset += bpCap;
             
             // 从背心加载
-            if (vestCap > 0 && vestStack.hasTag() && vestStack.getTag().contains("Inventory")) {
-                ItemStackHandler vestHandler = new ItemStackHandler(vestCap);
-                vestHandler.deserializeNBT(vestStack.getTag().getCompound("Inventory"));
-                for (int i = 0; i < Math.min(vestCap, vestHandler.getSlots()); i++) {
-                    if (currentOffset + i < this.backpackContentHandler.getSlots()) {
-                        this.backpackContentHandler.setStackInSlot(currentOffset + i, vestHandler.getStackInSlot(i));
-                    }
-                }
+            if (vestCap > 0) {
+                loadSectionFromItem(vestStack, currentOffset, vestCap);
             }
             currentOffset += vestCap;
 
@@ -2794,6 +2791,228 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             this.backpackContentHandler.setStackInSlot(i, ItemStack.EMPTY);
         }
     }
+
+    private void refreshStorageLayout(ItemStack backpackOverride, ItemStack vestOverride) {
+        this.storageBackpackOverride = backpackOverride;
+        this.storageVestOverride = vestOverride;
+        try {
+            loadBackpackFromItem();
+            updateSlotPositions();
+        } finally {
+            this.storageBackpackOverride = null;
+            this.storageVestOverride = null;
+        }
+    }
+
+    private ItemStack getStorageBackpackStack() {
+        if (this.storageBackpackOverride != null) {
+            return this.storageBackpackOverride;
+        }
+        if (CuriosIntegration.isLoaded()) {
+            ItemStack curiosStack = CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BACK);
+            if (!curiosStack.isEmpty()) {
+                return curiosStack;
+            }
+        }
+        return this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
+                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_BACKPACK))
+                .orElse(ItemStack.EMPTY);
+    }
+
+    private ItemStack getStorageVestStack() {
+        if (this.storageVestOverride != null) {
+            return this.storageVestOverride;
+        }
+        if (CuriosIntegration.isLoaded()) {
+            ItemStack curiosStack = CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BODY);
+            if (!curiosStack.isEmpty()) {
+                return curiosStack;
+            }
+        }
+        return this.player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
+                .map(cap -> cap.getInventory().getStackInSlot(PlayerBackpack.SLOT_VEST))
+                .orElse(ItemStack.EMPTY);
+    }
+
+    private int getStorageSlotCount(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return 0;
+        }
+        int mmSlots = getModernMayhemInventorySize(stack);
+        if (mmSlots > 0) {
+            return mmSlots;
+        }
+        int configSlots = BlockZConfigs.getBackpackSlots(stack);
+        int handlerSlots = stack.getCapability(ForgeCapabilities.ITEM_HANDLER)
+                .map(IItemHandler::getSlots)
+                .orElse(0);
+        return Math.max(configSlots, handlerSlots);
+    }
+
+    private void loadSectionFromItem(ItemStack stack, int offset, int capacity) {
+        if (stack.isEmpty() || capacity <= 0) {
+            return;
+        }
+        if (loadModernMayhemSection(stack, offset, capacity)) {
+            return;
+        }
+        IItemHandler handler = stack.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
+        if (handler != null) {
+            int limit = Math.min(capacity, handler.getSlots());
+            for (int i = 0; i < limit; i++) {
+                if (offset + i < this.backpackContentHandler.getSlots()) {
+                    ItemStack loaded = handler.getStackInSlot(i);
+                    this.backpackContentHandler.setStackInSlot(offset + i, loaded.isEmpty() ? ItemStack.EMPTY : loaded.copy());
+                }
+            }
+            return;
+        }
+        if (!stack.hasTag() || !stack.getTag().contains("Inventory")) {
+            return;
+        }
+        ItemStackHandler fallbackHandler = new ItemStackHandler(capacity);
+        fallbackHandler.deserializeNBT(stack.getTag().getCompound("Inventory"));
+        for (int i = 0; i < Math.min(capacity, fallbackHandler.getSlots()); i++) {
+            if (offset + i < this.backpackContentHandler.getSlots()) {
+                this.backpackContentHandler.setStackInSlot(offset + i, fallbackHandler.getStackInSlot(i));
+            }
+        }
+    }
+
+    private void saveSectionToItem(ItemStack stack, int offset, int capacity) {
+        if (stack.isEmpty() || capacity <= 0) {
+            return;
+        }
+        if (saveModernMayhemSection(stack, offset, capacity)) {
+            return;
+        }
+        IItemHandler handler = stack.getCapability(ForgeCapabilities.ITEM_HANDLER).orElse(null);
+        if (handler != null) {
+            int limit = Math.min(capacity, handler.getSlots());
+            for (int i = 0; i < limit; i++) {
+                ItemStack content = offset + i < this.backpackContentHandler.getSlots()
+                        ? this.backpackContentHandler.getStackInSlot(offset + i)
+                        : ItemStack.EMPTY;
+                replaceItemHandlerSlot(handler, i, content);
+            }
+            return;
+        }
+        ItemStackHandler fallbackHandler = new ItemStackHandler(capacity);
+        boolean hasItems = false;
+        for (int i = 0; i < capacity; i++) {
+            if (offset + i < this.backpackContentHandler.getSlots()) {
+                ItemStack content = this.backpackContentHandler.getStackInSlot(offset + i);
+                fallbackHandler.setStackInSlot(i, content);
+                if (!content.isEmpty()) {
+                    hasItems = true;
+                }
+            }
+        }
+        if (hasItems) {
+            stack.getOrCreateTag().put("Inventory", fallbackHandler.serializeNBT());
+            return;
+        }
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        if (tag != null) {
+            tag.remove("Inventory");
+        }
+    }
+
+    private void replaceItemHandlerSlot(IItemHandler handler, int slot, ItemStack stack) {
+        if (slot < 0 || slot >= handler.getSlots()) {
+            return;
+        }
+        ItemStack existing = handler.getStackInSlot(slot);
+        if (!existing.isEmpty()) {
+            handler.extractItem(slot, existing.getCount(), false);
+        }
+        if (!stack.isEmpty()) {
+            handler.insertItem(slot, stack.copy(), false);
+        }
+    }
+
+    private int getModernMayhemInventorySize(ItemStack stack) {
+        return invokeIntNoArgs(stack, "net.tkg.ModernMayhem.server.item.generic.GenericBackpackItem", "getInventorySize");
+    }
+
+    private int getModernMayhemInventoryColumns(ItemStack stack) {
+        return invokeIntNoArgs(stack, "net.tkg.ModernMayhem.server.item.generic.GenericBackpackItem", "getInventoryColumns");
+    }
+
+    private int invokeIntNoArgs(ItemStack stack, String className, String methodName) {
+        if (stack.isEmpty()) {
+            return 0;
+        }
+        Item item = stack.getItem();
+        if (!className.equals(item.getClass().getName())) {
+            Class<?> currentClass = item.getClass();
+            boolean matched = false;
+            while (currentClass != null) {
+                if (className.equals(currentClass.getName())) {
+                    matched = true;
+                    break;
+                }
+                currentClass = currentClass.getSuperclass();
+            }
+            if (!matched) {
+                return 0;
+            }
+        }
+        try {
+            Method method = item.getClass().getMethod(methodName);
+            Object result = method.invoke(item);
+            return result instanceof Number number ? Math.max(0, number.intValue()) : 0;
+        } catch (ReflectiveOperationException ignored) {
+            return 0;
+        }
+    }
+
+    private boolean loadModernMayhemSection(ItemStack stack, int offset, int capacity) {
+        int mmSize = getModernMayhemInventorySize(stack);
+        if (mmSize <= 0) {
+            return false;
+        }
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains("inventory")) {
+            return true;
+        }
+        ItemStackHandler handler = new ItemStackHandler(mmSize);
+        handler.deserializeNBT(tag.getCompound("inventory"));
+        int limit = Math.min(Math.min(capacity, mmSize), handler.getSlots());
+        for (int i = 0; i < limit; i++) {
+            if (offset + i < this.backpackContentHandler.getSlots()) {
+                ItemStack loaded = handler.getStackInSlot(i);
+                this.backpackContentHandler.setStackInSlot(offset + i, loaded.isEmpty() ? ItemStack.EMPTY : loaded.copy());
+            }
+        }
+        return true;
+    }
+
+    private boolean saveModernMayhemSection(ItemStack stack, int offset, int capacity) {
+        int mmSize = getModernMayhemInventorySize(stack);
+        if (mmSize <= 0) {
+            return false;
+        }
+        ItemStackHandler handler = new ItemStackHandler(mmSize);
+        boolean hasItems = false;
+        int limit = Math.min(capacity, mmSize);
+        for (int i = 0; i < limit; i++) {
+            if (offset + i < this.backpackContentHandler.getSlots()) {
+                ItemStack content = this.backpackContentHandler.getStackInSlot(offset + i);
+                handler.setStackInSlot(i, content);
+                if (!content.isEmpty()) {
+                    hasItems = true;
+                }
+            }
+        }
+        net.minecraft.nbt.CompoundTag tag = stack.getOrCreateTag();
+        if (hasItems) {
+            tag.put("inventory", handler.serializeNBT());
+        } else {
+            tag.remove("inventory");
+        }
+        return true;
+    }
     
     private void clearCorpseHandler() {
         for (int i = 0; i < this.corpseContentHandler.getSlots(); i++) {
@@ -2812,7 +3031,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                     -10000,
                     UIConstants.INVENTORY_COLS,
                     this::getCorpseStorageCapacity,
-                    this::isBackpackNested
+                    this::isStorageItemWithContents
             ));
         }
     }

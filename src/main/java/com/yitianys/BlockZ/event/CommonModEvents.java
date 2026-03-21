@@ -2,6 +2,7 @@ package com.yitianys.BlockZ.event;
 
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
+import com.yitianys.BlockZ.init.ModEffects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -11,11 +12,26 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.monster.Zombie;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import com.yitianys.BlockZ.util.PlayerMessageUtils;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.network.NetworkHooks;
+import net.minecraftforge.network.PacketDistributor;
 
 import com.yitianys.BlockZ.capability.PlayerBackpack;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
@@ -31,20 +47,83 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraft.world.entity.Entity;
 
 import com.yitianys.BlockZ.util.InventoryUtils;
-import com.yitianys.BlockZ.util.ItemHandlerContainer;
 import net.minecraft.world.entity.vehicle.ContainerEntity;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.items.IItemHandler;
 
 @Mod.EventBusSubscriber(modid = BlockZ.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class CommonModEvents {
 
+    private static final float ZOMBIE_BLEEDING_BASE_CHANCE = 0.1F;
+    private static final int INFINITE_DURATION = 9999999;
+    private static final int FRACTURE_RECOVERY_TICKS = 20 * 60 * 5;
+
+    private static final UUID ANALGESIC_FRACTURE_SPEED_UUID = UUID.fromString("6f7a038d-8c0c-4d92-9c26-9c1b032b3f7c");
+    private static final AttributeModifier ANALGESIC_FRACTURE_SPEED_MODIFIER = new AttributeModifier(
+            ANALGESIC_FRACTURE_SPEED_UUID,
+            "blockz_analgesic_fracture_speed",
+            1.2222222222D,
+            AttributeModifier.Operation.MULTIPLY_TOTAL
+    );
+
+    private static final UUID SPLINT_FRACTURE_RECOVERY_SPEED_UUID = UUID.fromString("04da1c28-4fe7-4c6d-b0c6-69cd310df94e");
+    private static final AttributeModifier SPLINT_FRACTURE_RECOVERY_SPEED_MODIFIER = new AttributeModifier(
+            SPLINT_FRACTURE_RECOVERY_SPEED_UUID,
+            "blockz_splint_fracture_recovery_speed",
+            0.4444444444D,
+            AttributeModifier.Operation.MULTIPLY_TOTAL
+    );
+
     @SubscribeEvent
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || event.player.level().isClientSide) return;
 
+        if (!BlockZConfigs.enableNursingSystem.get()) return;
+
         Player player = event.player;
         Inventory inv = player.getInventory();
+
+        if (!BlockZConfigs.enableBleeding.get() && player.hasEffect(ModEffects.BLEEDING.get())) {
+            player.removeEffect(ModEffects.BLEEDING.get());
+        }
+        if (!BlockZConfigs.enableBrokenLegs.get() && player.hasEffect(ModEffects.FRACTURE.get())) {
+            player.removeEffect(ModEffects.FRACTURE.get());
+        }
+
+        if (BlockZConfigs.enableBrokenLegs.get()) {
+            MobEffectInstance fractureInstance = player.getEffect(ModEffects.FRACTURE.get());
+            boolean fractured = fractureInstance != null;
+            boolean analgesic = player.hasEffect(ModEffects.ANALGESIC.get());
+            boolean recovering = fractured && fractureInstance.getDuration() <= FRACTURE_RECOVERY_TICKS;
+            AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+            if (speed != null) {
+                if (!fractured) {
+                    if (speed.getModifier(ANALGESIC_FRACTURE_SPEED_UUID) != null) {
+                        speed.removeModifier(ANALGESIC_FRACTURE_SPEED_UUID);
+                    }
+                    if (speed.getModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID) != null) {
+                        speed.removeModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID);
+                    }
+                } else if (analgesic) {
+                    if (speed.getModifier(ANALGESIC_FRACTURE_SPEED_UUID) == null) {
+                        speed.addTransientModifier(ANALGESIC_FRACTURE_SPEED_MODIFIER);
+                    }
+                    if (speed.getModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID) != null) {
+                        speed.removeModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID);
+                    }
+                } else {
+                    if (speed.getModifier(ANALGESIC_FRACTURE_SPEED_UUID) != null) {
+                        speed.removeModifier(ANALGESIC_FRACTURE_SPEED_UUID);
+                    }
+                    if (recovering) {
+                        if (speed.getModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID) == null) {
+                            speed.addTransientModifier(SPLINT_FRACTURE_RECOVERY_SPEED_MODIFIER);
+                        }
+                    } else if (speed.getModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID) != null) {
+                        speed.removeModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID);
+                    }
+                }
+            }
+        }
         
         // 全局清理：热栏(0-8)、副手(40)、护甲栏(36-39)等不应该出现锁定物品
         // 锁定物品只应该出现在原版背包的主存储区(9-35)的被锁定部分
@@ -52,7 +131,7 @@ public class CommonModEvents {
         if (player.containerMenu != null && player.containerMenu.getCarried().is(ModItems.LOCK_ITEM.get())) {
             player.containerMenu.setCarried(ItemStack.EMPTY);
         }
-        
+
         // 检查热栏 (0-8)
         for (int i = 0; i < 9; i++) {
             if (inv.getItem(i).is(ModItems.LOCK_ITEM.get())) {
@@ -120,6 +199,69 @@ public class CommonModEvents {
                     inv.setItem(i, ItemStack.EMPTY);
                 }
             }
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public static void onLivingFall(LivingFallEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (player.isCreative() || player.isSpectator()) return;
+        if (!BlockZConfigs.enableNursingSystem.get()) return;
+
+        if (!BlockZConfigs.enableBrokenLegs.get()) return;
+
+        float distance = event.getDistance();
+        if (distance <= 0.0F) return;
+        if (distance < 6.5F) return;
+
+        MobEffectInstance currentFracture = player.getEffect(ModEffects.FRACTURE.get());
+        boolean recovering = currentFracture != null && currentFracture.getDuration() <= FRACTURE_RECOVERY_TICKS;
+        if (currentFracture != null && !recovering) {
+            return;
+        }
+
+        float baseChance = (float) (BlockZConfigs.brokenLegChanceMultiplier.get() * player.fallDistance / player.getMaxFallDistance());
+        float maxChance = BlockZConfigs.brokenLegMaxChance.get().floatValue();
+        float legBreakChance = Math.min(maxChance, Math.max(0.0F, baseChance));
+        if (player.getRandom().nextFloat() < legBreakChance) {
+            if (recovering) {
+                player.addEffect(new MobEffectInstance(ModEffects.FRACTURE.get(), INFINITE_DURATION, 0, false, false, true));
+                PlayerMessageUtils.sendActionbar(player, Component.translatable("msg.blockz.splint_required_again"));
+            } else if (player.addEffect(new MobEffectInstance(ModEffects.FRACTURE.get(), INFINITE_DURATION, 0, false, false, true))) {
+                PlayerMessageUtils.sendActionbar(player, Component.translatable("msg.blockz.fracture_from_fall"));
+            }
+            player.addEffect(new MobEffectInstance(net.minecraft.world.effect.MobEffects.BLINDNESS, 100, 1, false, false, true));
+        }
+    }
+
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public static void onLivingHurt(LivingHurtEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (!BlockZConfigs.enableNursingSystem.get()) return;
+        if (player.isCreative() || player.isSpectator()) return;
+        if (event.getAmount() <= 0.0F) return;
+
+        if (!BlockZConfigs.enableBleeding.get()) return;
+
+        DamageSource source = event.getSource();
+        Entity directEntity = source.getDirectEntity();
+        Entity attacker = source.getEntity();
+
+        float chance = (float) (BlockZConfigs.baseBleedingChance.get() * event.getAmount());
+        if (attacker instanceof Zombie || directEntity instanceof Zombie) {
+            chance = Math.max(chance, ZOMBIE_BLEEDING_BASE_CHANCE * event.getAmount());
+        }
+
+        chance = Math.min(0.95F, Math.max(0.0F, chance));
+
+        String msgId = source.getMsgId();
+        boolean isExplosion = msgId != null && msgId.toLowerCase(java.util.Locale.ROOT).contains("explosion");
+
+        if (!player.hasEffect(ModEffects.BLEEDING.get())
+                && (directEntity != null || isExplosion)
+                && player.getRandom().nextFloat() < chance
+                && player.addEffect(new MobEffectInstance(ModEffects.BLEEDING.get(), INFINITE_DURATION, 0, false, false, true))) {
+            PlayerMessageUtils.sendActionbar(player, Component.translatable("msg.blockz.wound_from_attack"));
         }
     }
 
@@ -200,6 +342,10 @@ public class CommonModEvents {
                 .orElse(true);
 
         if (!dayzEnabled) return;
+        if (isModernMayhemBackpackItem(event.getItemStack())) {
+            cancelInteract(event, true);
+            return;
+        }
         if (clientTryPickup(event, player)) {
             return;
         }
@@ -231,15 +377,25 @@ public class CommonModEvents {
             ItemStack stack = item.getItem();
             if (stack.isEmpty()) return false;
 
-            event.setCanceled(true);
-            event.setCancellationResult(InteractionResult.SUCCESS);
-            if (event instanceof PlayerInteractEvent.RightClickBlock blockEvent) {
-                blockEvent.setUseBlock(net.minecraftforge.eventbus.api.Event.Result.DENY);
-                blockEvent.setUseItem(net.minecraftforge.eventbus.api.Event.Result.DENY);
-            }
+            cancelInteract(event, false);
             return true;
         }
         return false;
+    }
+
+    private static void cancelInteract(PlayerInteractEvent event, boolean allowItemOverride) {
+        if (event.isCancelable()) {
+            event.setCanceled(true);
+        }
+        event.setCancellationResult(InteractionResult.SUCCESS);
+        if (event instanceof PlayerInteractEvent.RightClickBlock blockEvent) {
+            if (blockEvent.isCancelable()) {
+                blockEvent.setUseBlock(net.minecraftforge.eventbus.api.Event.Result.DENY);
+                blockEvent.setUseItem(net.minecraftforge.eventbus.api.Event.Result.DENY);
+            }
+        } else if (allowItemOverride && event instanceof PlayerInteractEvent.RightClickItem itemEvent) {
+            itemEvent.setCancellationResult(InteractionResult.SUCCESS);
+        }
     }
 
     private static boolean serverTryPickup(PlayerInteractEvent event, Player player) {
@@ -251,14 +407,7 @@ public class CommonModEvents {
             ItemStack stack = item.getItem();
             if (stack.isEmpty()) return false;
 
-            event.setCanceled(true);
-            event.setCancellationResult(InteractionResult.SUCCESS);
-            if (event instanceof PlayerInteractEvent.RightClickBlock blockEvent) {
-                blockEvent.setUseBlock(net.minecraftforge.eventbus.api.Event.Result.DENY);
-                blockEvent.setUseItem(net.minecraftforge.eventbus.api.Event.Result.DENY);
-            } else if (event instanceof PlayerInteractEvent.RightClickItem itemEvent) {
-                itemEvent.setCancellationResult(InteractionResult.SUCCESS);
-            }
+            cancelInteract(event, true);
 
             boolean added = InventoryUtils.addItemToDayZInventory(player.getInventory(), stack);
             if (added) {
@@ -273,6 +422,20 @@ public class CommonModEvents {
                 }
             }
             return true;
+        }
+        return false;
+    }
+
+    private static boolean isModernMayhemBackpackItem(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        Class<?> currentClass = stack.getItem().getClass();
+        while (currentClass != null) {
+            if ("net.tkg.ModernMayhem.server.item.generic.GenericBackpackItem".equals(currentClass.getName())) {
+                return true;
+            }
+            currentClass = currentClass.getSuperclass();
         }
         return false;
     }

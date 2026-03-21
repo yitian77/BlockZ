@@ -1,9 +1,14 @@
 package com.yitianys.BlockZ.init;
 
 import com.yitianys.BlockZ.BlockZ;
+import com.yitianys.BlockZ.item.BandageItem;
 import com.yitianys.BlockZ.item.BackpackItem;
 import com.yitianys.BlockZ.item.ClothingItem;
+import com.yitianys.BlockZ.item.CodeinePillsItem;
 import com.yitianys.BlockZ.item.LockItem;
+import com.yitianys.BlockZ.item.MorphineSyringeItem;
+import com.yitianys.BlockZ.item.RagsItem;
+import com.yitianys.BlockZ.item.SplintItem;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -104,6 +109,21 @@ public class ModItems {
         () -> new ClothingItem(new Item.Properties().stacksTo(1), ClothingItem.ClothingType.PANTS));
     public static final RegistryObject<Item> SHOES = ITEMS.register("shoes", 
         () -> new ClothingItem(new Item.Properties().stacksTo(1), ClothingItem.ClothingType.SHOES));
+
+    public static final RegistryObject<Item> SPLINT = ITEMS.register("splint",
+        () -> new SplintItem(new Item.Properties().stacksTo(4)));
+
+    public static final RegistryObject<Item> BANDAGE = ITEMS.register("bandage",
+        () -> new BandageItem(new Item.Properties().stacksTo(8)));
+
+    public static final RegistryObject<Item> RAGS = ITEMS.register("rags",
+        () -> new RagsItem(new Item.Properties().stacksTo(16)));
+
+    public static final RegistryObject<Item> MORPHINE_SYRINGE = ITEMS.register("morphine_syringe",
+        () -> new MorphineSyringeItem(new Item.Properties().stacksTo(4)));
+
+    public static final RegistryObject<Item> CODEINE_PILLS = ITEMS.register("codeine_pills",
+        () -> new CodeinePillsItem(new Item.Properties().stacksTo(8)));
 
     // --- 系统物品 ---
     public static final RegistryObject<Item> LOCK_ITEM = ITEMS.register("lock_item",
