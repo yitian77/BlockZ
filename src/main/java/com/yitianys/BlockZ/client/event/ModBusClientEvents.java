@@ -5,6 +5,7 @@ import com.yitianys.BlockZ.client.gui.DayZHudOverlay;
 import com.yitianys.BlockZ.client.gui.DayZInventoryScreen;
 import com.yitianys.BlockZ.client.key.ModKeyMappings;
 import com.yitianys.BlockZ.client.renderer.CorpseRenderer;
+import com.yitianys.BlockZ.client.renderer.DayZZombieRenderer;
 import com.yitianys.BlockZ.client.renderer.layer.ClothingLayer;
 import com.yitianys.BlockZ.init.ModEntities;
 import com.yitianys.BlockZ.init.ModMenus;
@@ -44,6 +45,7 @@ public class ModBusClientEvents {
 
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
+        event.registerEntityRenderer(ModEntities.DAYZ_ZOMBIE.get(), DayZZombieRenderer::new);
         event.registerEntityRenderer(ModEntities.CORPSE.get(), CorpseRenderer::new);
     }
 

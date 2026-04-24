@@ -1,0 +1,81 @@
+{
+  "entity.dayz_zombie.idle1": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/idle1"
+    ]
+  },
+  "entity.dayz_zombie.idle2": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/idle2"
+    ]
+  },
+  "entity.dayz_zombie.idle3": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/idle3"
+    ]
+  },
+  "entity.dayz_zombie.hurt1": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/hurt1"
+    ]
+  },
+  "entity.dayz_zombie.hurt2": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/hurt2"
+    ]
+  },
+  "entity.dayz_zombie.hurt3": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/hurt3"
+    ]
+  },
+  "entity.dayz_zombie.death1": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/death1"
+    ]
+  },
+  "entity.dayz_zombie.death2": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/death2"
+    ]
+  },
+  "entity.dayz_zombie.fall": {
+    "sounds": [
+      "blockz:entity/dayz_zombie/fall1"
+    ]
+  },
+  "player.stamina.regen_exhausted": {
+    "sounds": [
+      "blockz:player/stamina/stamina_regen_exhausted"
+    ]
+  },
+  "player.stamina.regen_normal": {
+    "sounds": [
+      "blockz:player/stamina/stamina_regen_normal"
+    ]
+  },
+  "music.menu_theme_0": {
+    "sounds": [
+      {
+        "name": "blockz:music/menu/menu_theme_0",
+        "stream": true
+      }
+    ]
+  },
+  "music.menu_theme_1": {
+    "sounds": [
+      {
+        "name": "blockz:music/menu/menu_theme_1",
+        "stream": true
+      }
+    ]
+  },
+  "music.menu_theme_2": {
+    "sounds": [
+      {
+        "name": "blockz:music/menu/menu_theme_2",
+        "stream": true
+      }
+    ]
+  }
+}

@@ -30,7 +30,11 @@ public class PlayerBackpack implements INBTSerializable<CompoundTag> {
     @Override
     public CompoundTag serializeNBT() {
         CompoundTag nbt = new CompoundTag();
+        
+        // 始终完整保存所有槽位，确保数据持久化安全
+        // 即使 Curios 存在，我们也应保留自身 Capability 的数据作为备份或主存储
         nbt.put("Inventory", inventory.serializeNBT());
+        
         nbt.putBoolean("DayzEnabled", dayzEnabled);
         return nbt;
     }

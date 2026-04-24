@@ -3,6 +3,8 @@ package com.yitianys.BlockZ.util;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.init.ModItems;
@@ -23,6 +25,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ItemSizeManager {
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Map<Item, ItemSize> SIZES = new ConcurrentHashMap<>();
     private static final Map<Item, Integer> CUSTOM_SLOTS = new ConcurrentHashMap<>();
     private static final Map<Item, Integer> CUSTOM_CAP_WIDTH = new ConcurrentHashMap<>();
@@ -117,6 +120,32 @@ public class ItemSizeManager {
 
     public static void registerGridColor(Item item, int argbColor) {
         GRID_COLORS.put(item, argbColor);
+    }
+
+    public static void clearGridColor(Item item) {
+        if (item == null) {
+            return;
+        }
+        GRID_COLORS.remove(item);
+    }
+
+    public static void updateItemRule(Item item, int width, int height, Integer gridColor) {
+        if (item == null || item == Items.AIR || width <= 0 || height <= 0) {
+            return;
+        }
+        registerSize(item, width, height);
+        if (gridColor == null) {
+            clearGridColor(item);
+            return;
+        }
+        registerGridColor(item, gridColor);
+    }
+
+    public static void updateCapacityRule(Item item, int width, int height) {
+        if (item == null || item == Items.AIR || width <= 0 || height <= 0) {
+            return;
+        }
+        registerCapacityShape(item, width, height);
     }
 
     public static int getCapacityCols(ItemStack stack, int defaultCols) {
@@ -314,7 +343,7 @@ public class ItemSizeManager {
         registerSize(Items.SHIELD, 2, 2);
     }
 
-    private static Integer parseColor(JsonElement element) {
+    public static Integer parseColor(JsonElement element) {
         try {
             if (element == null || element.isJsonNull()) return null;
             if (element.isJsonPrimitive()) {
@@ -341,6 +370,116 @@ public class ItemSizeManager {
         return null;
     }
 
+    public static Integer parseColorString(String rawColor) {
+        if (rawColor == null) {
+            return null;
+        }
+        return parseColor(new com.google.gson.JsonPrimitive(rawColor));
+    }
+
+    public static boolean saveItemRule(Item item, int width, int height, Integer gridColor) {
+        if (item == null || item == Items.AIR || width <= 0 || height <= 0) {
+            return false;
+        }
+        Path configDir = FMLPaths.CONFIGDIR.get().resolve("blockz");
+        Path filePath = configDir.resolve("grid_items.json");
+        ensureConfigFile(configDir, filePath);
+
+        try {
+            Files.createDirectories(configDir);
+            JsonObject root;
+            if (Files.exists(filePath)) {
+                try (Reader reader = Files.newBufferedReader(filePath, StandardCharsets.UTF_8)) {
+                    JsonReader jsonReader = new JsonReader(reader);
+                    jsonReader.setLenient(true);
+                    JsonElement parsed = JsonParser.parseReader(jsonReader);
+                    root = parsed != null && parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
+                }
+            } else {
+                root = new JsonObject();
+            }
+
+            JsonObject itemsObject = root.has("items") && root.get("items").isJsonObject()
+                    ? root.getAsJsonObject("items")
+                    : new JsonObject();
+            root.add("items", itemsObject);
+
+            ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(item);
+            if (itemId == null) {
+                return false;
+            }
+
+            JsonObject itemObject = itemsObject.has(itemId.toString()) && itemsObject.get(itemId.toString()).isJsonObject()
+                    ? itemsObject.getAsJsonObject(itemId.toString())
+                    : new JsonObject();
+            itemObject.addProperty("width", width);
+            itemObject.addProperty("height", height);
+
+            if (gridColor == null) {
+                itemObject.remove("grid_color");
+            } else {
+                itemObject.addProperty("grid_color", String.format("#%08X", gridColor));
+            }
+
+            itemsObject.add(itemId.toString(), itemObject);
+
+            Files.writeString(filePath, GSON.toJson(root), StandardCharsets.UTF_8);
+            updateItemRule(item, width, height, gridColor);
+            return true;
+        } catch (Exception e) {
+            BlockZ.LOGGER.error("Failed to save grid item rule for {}", ForgeRegistries.ITEMS.getKey(item), e);
+            return false;
+        }
+    }
+
+    public static boolean saveCapacityRule(Item item, int capWidth, int capHeight) {
+        if (item == null || item == Items.AIR || capWidth <= 0 || capHeight <= 0) {
+            return false;
+        }
+        Path configDir = FMLPaths.CONFIGDIR.get().resolve("blockz");
+        Path filePath = configDir.resolve("grid_items.json");
+        ensureConfigFile(configDir, filePath);
+
+        try {
+            Files.createDirectories(configDir);
+            JsonObject root;
+            if (Files.exists(filePath)) {
+                try (Reader reader = Files.newBufferedReader(filePath, StandardCharsets.UTF_8)) {
+                    JsonReader jsonReader = new JsonReader(reader);
+                    jsonReader.setLenient(true);
+                    JsonElement parsed = JsonParser.parseReader(jsonReader);
+                    root = parsed != null && parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
+                }
+            } else {
+                root = new JsonObject();
+            }
+
+            JsonObject itemsObject = root.has("items") && root.get("items").isJsonObject()
+                    ? root.getAsJsonObject("items")
+                    : new JsonObject();
+            root.add("items", itemsObject);
+
+            ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(item);
+            if (itemId == null) {
+                return false;
+            }
+
+            JsonObject itemObject = itemsObject.has(itemId.toString()) && itemsObject.get(itemId.toString()).isJsonObject()
+                    ? itemsObject.getAsJsonObject(itemId.toString())
+                    : new JsonObject();
+            itemObject.addProperty("cap_width", capWidth);
+            itemObject.addProperty("cap_height", capHeight);
+            itemsObject.add(itemId.toString(), itemObject);
+
+            Files.writeString(filePath, GSON.toJson(root), StandardCharsets.UTF_8);
+            updateCapacityRule(item, capWidth, capHeight);
+            return true;
+        } catch (Exception e) {
+            BlockZ.LOGGER.error("Failed to save capacity rule for {}", ForgeRegistries.ITEMS.getKey(item), e);
+            return false;
+        }
+    }
+
     private static void ensureConfigFile(Path configDir, Path filePath) {
         if (Files.exists(filePath)) return;
         try {
@@ -362,7 +501,28 @@ public class ItemSizeManager {
         SYNCED_GRID_ENABLED = enabled;
     }
 
-    public static void setRules(Map<Item, ItemSize> sizes, java.util.List<NbtRule> nbtRules, Map<Item, Integer> customSlots) {
+    public static Map<Item, ItemSize> snapshotSizes() {
+        return new java.util.HashMap<>(SIZES);
+    }
+
+    public static java.util.List<NbtRule> snapshotNbtRules() {
+        return new java.util.ArrayList<>(NBT_RULES);
+    }
+
+    public static Map<Item, Integer> snapshotCustomSlots() {
+        return new java.util.HashMap<>(CUSTOM_SLOTS);
+    }
+
+    public static Map<Item, Integer> snapshotCapacityWidths() {
+        return new java.util.HashMap<>(CUSTOM_CAP_WIDTH);
+    }
+
+    public static Map<Item, Integer> snapshotGridColors() {
+        return new java.util.HashMap<>(GRID_COLORS);
+    }
+
+    public static void setRules(Map<Item, ItemSize> sizes, java.util.List<NbtRule> nbtRules, Map<Item, Integer> customSlots,
+                                Map<Item, Integer> capacityWidths, Map<Item, Integer> gridColors) {
         SIZES.clear();
         if (sizes != null) {
             SIZES.putAll(sizes);
@@ -374,6 +534,14 @@ public class ItemSizeManager {
         CUSTOM_SLOTS.clear();
         if (customSlots != null) {
             CUSTOM_SLOTS.putAll(customSlots);
+        }
+        CUSTOM_CAP_WIDTH.clear();
+        if (capacityWidths != null) {
+            CUSTOM_CAP_WIDTH.putAll(capacityWidths);
+        }
+        GRID_COLORS.clear();
+        if (gridColors != null) {
+            GRID_COLORS.putAll(gridColors);
         }
     }
 }

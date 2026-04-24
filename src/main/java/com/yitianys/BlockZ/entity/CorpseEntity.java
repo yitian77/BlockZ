@@ -36,7 +36,7 @@ public class CorpseEntity extends LivingEntity implements Container, MenuProvide
     // private static final EntityDataAccessor<Integer> DESPAWN_TIMER = SynchedEntityData.defineId(CorpseEntity.class, EntityDataSerializers.INT); // Removed for optimization
     private static final EntityDataAccessor<Float> ROTATION = SynchedEntityData.defineId(CorpseEntity.class, EntityDataSerializers.FLOAT);
 
-    private final SimpleContainer inventory = new SimpleContainer(30);
+    private final SimpleContainer inventory = new SimpleContainer(256);
     private int despawnTimer;
 
     public CorpseEntity(EntityType<? extends CorpseEntity> type, Level level) {

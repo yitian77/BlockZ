@@ -5,6 +5,7 @@ import com.yitianys.BlockZ.client.ClientSettings;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.network.DayzToggleStateS2C;
 import com.yitianys.BlockZ.network.SyncBackpackS2C;
+import com.yitianys.BlockZ.network.SyncPlayerStatusS2C;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
@@ -32,6 +33,13 @@ public class ClientPacketHandler {
                         msg.isEnabled() ? "msg.blockz.dayz_enabled" : "msg.blockz.dayz_disabled"));
             }
         }
+    }
+
+    public static void handleSyncPlayerStatus(SyncPlayerStatusS2C msg, Supplier<NetworkEvent.Context> ctx) {
+        ClientSettings.healthPointsRatio = msg.getHealthPointsRatio();
+        ClientSettings.healthRatio = msg.getHealthRatio();
+        ClientSettings.staminaRatio = msg.getStaminaRatio();
+        ClientSettings.infectionRatio = msg.getInfectionRatio();
     }
 
 }

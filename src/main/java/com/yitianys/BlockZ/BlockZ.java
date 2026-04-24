@@ -1,12 +1,14 @@
 package com.yitianys.BlockZ;
 
 import com.yitianys.BlockZ.config.BlockZConfigs;
+import com.yitianys.BlockZ.config.DayZZombieConfig;
 import com.yitianys.BlockZ.client.key.ModKeyMappings;
 import com.yitianys.BlockZ.init.ModCreativeTabs;
 import com.yitianys.BlockZ.init.ModEntities;
 import com.yitianys.BlockZ.init.ModEffects;
 import com.yitianys.BlockZ.init.ModItems;
 import com.yitianys.BlockZ.init.ModMenus;
+import com.yitianys.BlockZ.init.ModSounds;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.util.ItemSizeManager;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
@@ -22,6 +24,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
+import software.bernie.geckolib.GeckoLib;
 
 @Mod(BlockZ.MODID)
 public class BlockZ {
@@ -30,11 +33,15 @@ public class BlockZ {
 
     public BlockZ(final FMLJavaModLoadingContext context) {
         IEventBus modBus = context.getModEventBus();
+        GeckoLib.initialize();
         BlockZConfigs.register();
+        DayZZombieConfig.register();
         context.registerConfig(ModConfig.Type.COMMON, BlockZConfigs.COMMON_SPEC);
+        context.registerConfig(ModConfig.Type.COMMON, DayZZombieConfig.COMMON_SPEC, "blockz/dayz_zombie.toml");
         NetworkHandler.init();
         ModEffects.EFFECTS.register(modBus);
         ModItems.ITEMS.register(modBus);
+        ModSounds.SOUNDS.register(modBus);
         ModEntities.register(modBus);
         modBus.addListener(ModEntities::registerAttributes);
         ModCreativeTabs.CREATIVE_MODE_TABS.register(modBus);
@@ -44,7 +51,10 @@ public class BlockZ {
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
-        event.enqueueWork(ItemSizeManager::loadCustomSizes);
+        event.enqueueWork(() -> {
+            ItemSizeManager.loadCustomSizes();
+            ModEntities.registerSpawnPlacements();
+        });
     }
 
     @SubscribeEvent

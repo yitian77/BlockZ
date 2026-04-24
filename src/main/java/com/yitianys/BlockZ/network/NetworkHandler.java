@@ -75,6 +75,12 @@ public class NetworkHandler {
                 .consumerMainThread(SyncGridRulesS2C::handle)
                 .add();
         id++;
+        CHANNEL.messageBuilder(SyncPlayerStatusS2C.class, id, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(SyncPlayerStatusS2C::encode)
+                .decoder(SyncPlayerStatusS2C::decode)
+                .consumerMainThread(SyncPlayerStatusS2C::handle)
+                .add();
+        id++;
         CHANNEL.messageBuilder(RequestSwitchToDayZMenuC2S.class, id, NetworkDirection.PLAY_TO_SERVER)
                 .encoder(RequestSwitchToDayZMenuC2S::encode)
                 .decoder(RequestSwitchToDayZMenuC2S::decode)

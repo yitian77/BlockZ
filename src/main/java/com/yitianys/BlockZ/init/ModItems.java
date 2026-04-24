@@ -10,6 +10,7 @@ import com.yitianys.BlockZ.item.MorphineSyringeItem;
 import com.yitianys.BlockZ.item.RagsItem;
 import com.yitianys.BlockZ.item.SplintItem;
 import net.minecraft.world.item.Item;
+import net.minecraftforge.common.ForgeSpawnEggItem;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
@@ -124,6 +125,9 @@ public class ModItems {
 
     public static final RegistryObject<Item> CODEINE_PILLS = ITEMS.register("codeine_pills",
         () -> new CodeinePillsItem(new Item.Properties().stacksTo(8)));
+
+    public static final RegistryObject<Item> DAYZ_ZOMBIE_SPAWN_EGG = ITEMS.register("dayz_zombie_spawn_egg",
+        () -> new ForgeSpawnEggItem(ModEntities.DAYZ_ZOMBIE, 0x5b6a59, 0xa58971, new Item.Properties()));
 
     // --- 系统物品 ---
     public static final RegistryObject<Item> LOCK_ITEM = ITEMS.register("lock_item",

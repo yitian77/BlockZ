@@ -7,4 +7,8 @@ public class ClientSettings {
     public static boolean dayzHudEnabled = true;
     public static int fractureFlashTicks = 0;
     public static long lastFractureFlashGameTime = -1L;
+    public static float healthPointsRatio = 1.0F;
+    public static float healthRatio = 1.0F;
+    public static float staminaRatio = 1.0F;
+    public static float infectionRatio = 0.0F;
 }

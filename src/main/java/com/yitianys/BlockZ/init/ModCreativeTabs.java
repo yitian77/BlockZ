@@ -56,6 +56,7 @@ public class ModCreativeTabs {
                 output.accept(ModItems.GLOVES_0.get());
                 output.accept(ModItems.GLOVES_1.get());
                 output.accept(ModItems.GLOVES_2.get());
+                output.accept(ModItems.DAYZ_ZOMBIE_SPAWN_EGG.get());
             })
             .build());
 

@@ -78,7 +78,7 @@ public class UIConstants {
 
     // 物品栏布局 (Restored to 5 columns)
     public static final int INVENTORY_COLS = 5;
-    public static final int INVENTORY_MAX_COLS = 6;
+    public static final int INVENTORY_MAX_COLS = 9; // 支持最大9列，允许指令设置更大的容量
     public static final int INVENTORY_SLOTS_X = INVENTORY_X + 4;
     public static final int INVENTORY_SLOTS_Y = PANEL_Y + 10;
 

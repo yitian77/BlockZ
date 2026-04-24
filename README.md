@@ -2,7 +2,7 @@
 
 一个旨在为 Minecraft 1.20.1 带来硬核生存体验的模组，深度致敬 DayZ 与 DayM。
 
-**当前版本**: 1.1.4-Alpha
+**当前版本**: 1.1.5-Alpha
 
 ## 🌟 核心功能
 
@@ -138,6 +138,8 @@
 ### 6. 管理员命令
 - `/blockz_toggle_ui <true|false> [target]`：切换指定玩家是否使用 DayZ UI。
 - `/blockz_reload`：重载 `grid_items.json` 并同步客户端。
+- `/blockz_grid_item <width> <height> [color]`：修改主手物品的占格大小与可选背景色（不填颜色则回退默认颜色），写入 `grid_items.json` 并同步客户端。
+- `/blockz_clothing_capacity <width> <height>`：仅限主手衣物，修改衣物/背包容量网格 `cap_width/cap_height`，写入 `grid_items.json` 并同步客户端。
 - `/blockz_clear_corpse [targets]`：清理尸体实体。
 
 ### 7. 物品指南

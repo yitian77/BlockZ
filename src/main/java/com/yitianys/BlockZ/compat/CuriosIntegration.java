@@ -2,6 +2,7 @@ package com.yitianys.BlockZ.compat;
 
 import com.yitianys.BlockZ.capability.PlayerBackpack;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -79,17 +80,59 @@ public final class CuriosIntegration {
         }
         player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
             ItemStackHandler handler = cap.getInventory();
-            syncHandlerSlot(handler, PlayerBackpack.SLOT_BACKPACK, getEquipped(player, SLOT_BACK));
-            syncHandlerSlot(handler, PlayerBackpack.SLOT_VEST, getEquipped(player, SLOT_BODY));
-            syncHandlerSlot(handler, PlayerBackpack.SLOT_MASK, getEquipped(player, SLOT_HEAD));
+            if (hasSlotHandler(player, SLOT_BACK)) {
+                ItemStack curio = getEquipped(player, SLOT_BACK);
+                syncHandlerSlot(handler, PlayerBackpack.SLOT_BACKPACK, safeCopy(curio));
+            }
+            if (hasSlotHandler(player, SLOT_BODY)) {
+                ItemStack curio = getEquipped(player, SLOT_BODY);
+                syncHandlerSlot(handler, PlayerBackpack.SLOT_VEST, safeCopy(curio));
+            }
+            if (hasSlotHandler(player, SLOT_HEAD)) {
+                ItemStack curio = getEquipped(player, SLOT_HEAD);
+                syncHandlerSlot(handler, PlayerBackpack.SLOT_MASK, safeCopy(curio));
+            }
         });
+    }
+
+    private static boolean hasSlotHandler(Player player, String slotId) {
+        if (!isLoaded() || player == null) {
+            return false;
+        }
+        return CuriosApi.getCuriosInventory(player)
+                .map(handler -> handler.getStacksHandler(slotId)
+                        .map(stacks -> stacks.getStacks().getSlots() > 0)
+                        .orElse(false))
+                .orElse(false);
     }
 
     private static void syncHandlerSlot(ItemStackHandler handler, int slot, ItemStack stack) {
         ItemStack current = handler.getStackInSlot(slot);
-        if (!ItemStack.isSameItemSameTags(current, stack)) {
+        // 仅在 Curios 端的物品不为空时才同步到 Capability
+        // 这样如果 Curios 因为某种原因（如初始化顺序或配置）没能提供物品，
+        // 我们能保留 Capability 自身从 NBT 加载的数据，防止物品消失。
+        if (!stack.isEmpty() && !ItemStack.isSameItemSameTags(current, stack)) {
             handler.setStackInSlot(slot, safeCopy(stack));
         }
+    }
+
+    public static ItemStack createMirrorStack(ItemStack stack) {
+        ItemStack mirror = safeCopy(stack);
+        if (mirror.isEmpty() || !mirror.hasTag()) {
+            return mirror;
+        }
+
+        CompoundTag tag = mirror.getTag();
+        if (tag == null) {
+            return mirror;
+        }
+
+        tag.remove("Inventory");
+        tag.remove("inventory");
+        if (tag.isEmpty()) {
+            mirror.setTag(null);
+        }
+        return mirror;
     }
 
     private static ItemStack safeCopy(ItemStack stack) {

@@ -1,0 +1,10 @@
+{
+  "replace": false,
+  "values": [
+    "blockz:backpack_coyote",
+    "blockz:backpack_alice",
+    "blockz:backpack_czech",
+    "blockz:backpack_czechpouch",
+    "blockz:backpack_patrolpack"
+  ]
+}

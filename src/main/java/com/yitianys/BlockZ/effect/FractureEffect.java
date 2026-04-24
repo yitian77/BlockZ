@@ -27,6 +27,14 @@ public class FractureEffect extends MobEffect {
     }
 
     @Override
+    public void addAttributeModifiers(LivingEntity entity, AttributeMap attributeMap, int amplifier) {
+        if (entity instanceof Player player && player.getAbilities().instabuild) {
+            return;
+        }
+        super.addAttributeModifiers(entity, attributeMap, amplifier);
+    }
+
+    @Override
     public void removeAttributeModifiers(LivingEntity entity, AttributeMap attributeMap, int amplifier) {
         super.removeAttributeModifiers(entity, attributeMap, amplifier);
         if (entity.level().isClientSide) {

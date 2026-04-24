@@ -267,8 +267,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
     private boolean isLoading = false;
     private boolean suppressDrop = false; // Flag to prevent double-dropping during swap
-    // 5x6 Vicinity + 10xX Inventory, 64 slots total for inventory seems safe for current configs
-    private final ItemStackHandler backpackContentHandler = new ItemStackHandler(64) {
+    // 5x6 Vicinity + 10xX Inventory, 256 slots total to support large 9x9 (81+) backpacks
+    private final ItemStackHandler backpackContentHandler = new ItemStackHandler(256) {
         @Override
         protected void onContentsChanged(int slot) {
             if (!isLoading) {
@@ -285,7 +285,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     private int lastCorpseVestCap = 0;
     private int lastCorpseShirtCap = 0;
     private int lastCorpsePantsCap = 0;
-    private final ItemStackHandler corpseContentHandler = new ItemStackHandler(128) {
+    private final ItemStackHandler corpseContentHandler = new ItemStackHandler(256) {
         @Override
         protected void onContentsChanged(int slot) {
             if (isCorpseLoading) return;
@@ -297,6 +297,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     private int syncedPocketCount = -1;
     private List<VicinitySlotLayout> clientVicinityLayout;
     private Map<Integer, VicinitySlotLayout> clientLayoutMap;
+    private boolean manageContainerOpenState;
 
     public void setSyncedPocketCount(int count) {
         this.syncedPocketCount = count;
@@ -415,7 +416,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     
     public int getCorpseStorageSlotEnd() {
         if (corpseStorageSlotStart < 0) return -1;
-        return corpseStorageSlotStart + 45 - 1;
+        return corpseStorageSlotStart + this.corpseContentHandler.getSlots() - 1;
     }
     
     public int getCorpseStorageCapacity() {
@@ -452,10 +453,36 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         updateSlotPositions();
     }
 
+    /**
+     * 获取附近物品界面需要的列数。
+     * 如果没有大容器，默认保持 5 列，避免界面过度伸展。
+     */
     public int getVicinityCols() {
-        if (isContainerVicinityLayout()) return getContainerVicinityCols();
-        if (isCorpseMode()) return getCorpseMaxCols();
-        return UIConstants.INVENTORY_COLS;
+        // 如果有特定的容器布局，按容器的列数来
+        if (isContainerVicinityLayout()) {
+            return Math.max(UIConstants.INVENTORY_COLS, getContainerVicinityCols());
+        }
+        
+        // 如果是地面物品模式
+        if (this.activeContainer == null) {
+            // 计算当前地上有多少物品
+            int filledCount = 0;
+            for (int i = 0; i < VICINITY_SLOTS; i++) {
+                if (!this.vicinityInventory.getItem(i).isEmpty()) {
+                    filledCount = i + 1;
+                }
+            }
+            // 如果地上的物品超过 5 列能显示的范围 (假设默认高度 6 行，5*6=30)
+            // 这里我们保持逻辑简单：除非物品多到需要更多列，否则默认 5 列
+            if (filledCount > 30) {
+                return 9; // 扩展到 9 列
+            }
+        } else if (this.activeContainer instanceof CorpseEntity) {
+            // 尸体界面通常比较宽
+            return Math.max(UIConstants.INVENTORY_COLS, 9);
+        }
+
+        return UIConstants.INVENTORY_COLS; // 默认 5 列
     }
 
     public int getVicinityPanelWidth() {
@@ -556,6 +583,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         super(ModMenus.DAYZ_INVENTORY.get(), id);
         this.player = inv.player;
         this.containerEntity = entity;
+        this.manageContainerOpenState = true;
         
         // 预先计算锁定状态
         boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
@@ -570,7 +598,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         
         if (entity instanceof Container c) {
             this.activeContainer = c;
-            c.startOpen(player);
+            if (this.manageContainerOpenState) {
+                this.activeContainer.startOpen(player);
+            }
         }
         
         // Initialize Crafting Grid
@@ -584,12 +614,21 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     }
 
     public DayZInventoryMenu(int id, Inventory inv, net.minecraft.world.Container container) {
-        this(id, inv, null, container);
+        this(id, inv, null, container, true);
+    }
+
+    public DayZInventoryMenu(int id, Inventory inv, net.minecraft.world.Container container, boolean manageContainerOpenState) {
+        this(id, inv, null, container, manageContainerOpenState);
     }
 
     private DayZInventoryMenu(int id, Inventory inv, BlockPos pos, net.minecraft.world.Container container) {
+        this(id, inv, pos, container, true);
+    }
+
+    private DayZInventoryMenu(int id, Inventory inv, BlockPos pos, net.minecraft.world.Container container, boolean manageContainerOpenState) {
         super(ModMenus.DAYZ_INVENTORY.get(), id);
         this.player = inv.player;
+        this.manageContainerOpenState = manageContainerOpenState;
         
         // 预先计算锁定状态
         boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
@@ -602,7 +641,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         
         if (container != null) {
             this.activeContainer = container;
-            this.activeContainer.startOpen(player);
+            if (this.manageContainerOpenState) {
+                this.activeContainer.startOpen(player);
+            }
         } else if (pos != null) {
             BlockEntity be = player.level().getBlockEntity(pos);
             
@@ -640,7 +681,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 if (this.activeContainer != null) {
                     this.lastContainerPos = pos;
                     this.lastLootrId = null;
-                    this.activeContainer.startOpen(player);
+                    if (this.manageContainerOpenState) {
+                        this.activeContainer.startOpen(player);
+                    }
                 }
             }
             
@@ -720,7 +763,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         super.removed(player);
         this.resultSlots.clearContent();
         
-        if (this.activeContainer != null) {
+        if (this.manageContainerOpenState && this.activeContainer != null) {
             this.activeContainer.stopOpen(player);
         }
         
@@ -845,7 +888,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         // 2.1 口袋区域（固定在顶部），其高度决定后续“衣服/背包内容区”的起始位置。
         // 否则穿上衣服/背包后，内容格子会从同一个 Y 开始布局，造成与口袋重叠。
         int pocketCount = getPocketCount();
-        int pocketRows = (pocketCount + cols - 1) / cols;
+        int pocketRows = (pocketCount + sectionMaxCols - 1) / sectionMaxCols;
         int pocketsHeight = pocketRows * UIConstants.SLOT_PITCH;
         this.pocketsY = UIConstants.INVENTORY_SLOTS_Y;
 
@@ -856,10 +899,31 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             int menuIndex = pocketStartIdx + i;
             if (menuIndex >= this.slots.size()) break;
             Slot s = this.slots.get(menuIndex);
-            int r = i / cols;
-            int c = i % cols;
+            int r = i / sectionMaxCols;
+            int c = i % sectionMaxCols;
             int x = startX + c * UIConstants.SLOT_PITCH;
             int y = UIConstants.INVENTORY_SLOTS_Y + r * UIConstants.SLOT_PITCH;
+            setSlotPos(s, x, y);
+        }
+
+        // 玩家快捷栏(9格)同样需要每 tick 恢复位置：
+        // 1) 滚动逻辑可能会把不可见槽位移到 -10000
+        // 2) 面板尺寸/位置调整时，这里统一以 HOTBAR 面板为参照进行居中布局
+        int hotbarStartIdx = getHotbarStart();
+        int hotbarCols = 5;
+        int hotbarRows = 2;
+        int hotbarContentW = hotbarCols * UIConstants.SLOT_PITCH;
+        int hotbarContentH = hotbarRows * UIConstants.SLOT_PITCH;
+        int hotbarInnerX = UIConstants.HOTBAR_X + Math.max(0, (UIConstants.HOTBAR_W - hotbarContentW) / 2);
+        int hotbarInnerY = UIConstants.HOTBAR_Y + Math.max(0, (UIConstants.HOTBAR_H - hotbarContentH) / 2);
+        for (int i = 0; i < 9; i++) {
+            int menuIndex = hotbarStartIdx + i;
+            if (menuIndex >= this.slots.size()) break;
+            Slot s = this.slots.get(menuIndex);
+            int r = i / hotbarCols;
+            int c = i % hotbarCols;
+            int x = hotbarInnerX + c * UIConstants.SLOT_PITCH;
+            int y = hotbarInnerY + r * UIConstants.SLOT_PITCH;
             setSlotPos(s, x, y);
         }
 
@@ -1052,10 +1116,11 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             int cShirtCap = getCorpseBackpackSlots(cShirtStack);
             int cPantsCap = getCorpseBackpackSlots(cPantsStack);
 
-            int safeBpCount = Math.min(cBpCap, 45);
-            int safeVestCount = Math.min(cVestCap, 45 - safeBpCount);
-            int safeShirtCount = Math.min(cShirtCap, 45 - safeBpCount - safeVestCount);
-            int safePantsCount = Math.min(cPantsCap, 45 - safeBpCount - safeVestCount - safeShirtCount);
+            int totalCap = this.corpseContentHandler.getSlots();
+            int safeBpCount = Math.min(cBpCap, totalCap);
+            int safeVestCount = Math.min(cVestCap, totalCap - safeBpCount);
+            int safeShirtCount = Math.min(cShirtCap, totalCap - safeBpCount - safeVestCount);
+            int safePantsCount = Math.min(cPantsCap, totalCap - safeBpCount - safeVestCount - safeShirtCount);
 
             this.corpseStorageCapacity = safeBpCount + safeVestCount + safeShirtCount + safePantsCount;
 
@@ -1136,7 +1201,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             }
 
             // Hide overflow slots
-            for (int i = 0; i < 45; i++) {
+            for (int i = 0; i < this.corpseContentHandler.getSlots(); i++) {
                 boolean isValid = false;
                 if (i < safeBpCount) isValid = true;
                 else if (i >= safeBpCount && i < safeBpCount + safeVestCount) isValid = true;
@@ -1160,8 +1225,19 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
     private int getCorpseVisibleSlots(Container container) {
         if (!(container instanceof CorpseEntity corpse)) return 0;
-        // Corpse has 9 equipment slots (0-8) + hotbar (9-17) + pockets (18-XX)
-        return 18 + this.getPocketCount();
+        
+        // 计算尸体容器中最后一个非空槽位的索引
+        int lastFilled = -1;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            if (!container.getItem(i).isEmpty()) {
+                lastFilled = i;
+            }
+        }
+        
+        // 基础槽位：9 (装备) + 9 (快捷栏) = 18
+        // 我们至少显示 18 个槽位，或者显示到最后一个有物品的槽位
+        int minVisible = 18 + getPocketCount();
+        return Math.max(minVisible, lastFilled + 1);
     }
 
     private void layoutCorpseVicinitySlot(int containerIndex, Slot slot) {
@@ -1434,6 +1510,17 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             if (resultSlotIndex != -1) {
                 menu.setRemoteSlot(resultSlotIndex, itemstack);
                 serverplayer.connection.send(new ClientboundContainerSetSlotPacket(menu.containerId, menu.incrementStateId(), resultSlotIndex, itemstack));
+            }
+        }
+    }
+
+    private void syncCapabilityMirror(int slotId, ItemStack stack) {
+        if (this.player instanceof ServerPlayer serverPlayer) {
+            try {
+                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
+                        new SyncBackpackS2C(slotId, stack));
+            } catch (Exception e) {
+                BlockZ.LOGGER.error("Failed to sync capability mirror for slot " + slotId, e);
             }
         }
     }
@@ -1887,13 +1974,33 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     private void syncSlot(int slotId, ItemStack stack) {
         if (this.player instanceof ServerPlayer serverPlayer) {
             try {
+                ItemStack clientMirror = getCapabilityMirrorStack(slotId, stack);
                 CuriosIntegration.syncFromCapability(serverPlayer, slotId, stack);
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer), 
-                    new SyncBackpackS2C(slotId, stack));
+                    new SyncBackpackS2C(slotId, clientMirror));
             } catch (Exception e) {
                 BlockZ.LOGGER.error("Failed to sync slot " + slotId, e);
             }
         }
+    }
+
+    private ItemStack getCapabilityMirrorStack(int slotId, ItemStack stack) {
+        if (stack.isEmpty() || !CuriosIntegration.isLoaded()) {
+            return stack;
+        }
+
+        return switch (slotId) {
+            case PlayerBackpack.SLOT_BACKPACK -> !CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BACK).isEmpty()
+                    ? CuriosIntegration.createMirrorStack(stack)
+                    : stack;
+            case PlayerBackpack.SLOT_VEST -> !CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_BODY).isEmpty()
+                    ? CuriosIntegration.createMirrorStack(stack)
+                    : stack;
+            case PlayerBackpack.SLOT_MASK -> !CuriosIntegration.getEquippedDirect(this.player, CuriosIntegration.SLOT_HEAD).isEmpty()
+                    ? CuriosIntegration.createMirrorStack(stack)
+                    : stack;
+            default -> stack;
+        };
     }
 
     public net.minecraft.world.Container getActiveContainer() {
@@ -2076,11 +2183,19 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
      */
     public int getInventoryMaxCols() {
         int max = UIConstants.INVENTORY_COLS;
+        
+        // 考虑初始口袋格子需要的宽度
+        int pocketCount = getPocketCount();
+        if (pocketCount > 0) {
+            max = Math.max(max, Math.min(UIConstants.INVENTORY_MAX_COLS, pocketCount));
+        }
+
         max = Math.max(max, this.backpackSectionCols);
         max = Math.max(max, this.vestSectionCols);
         max = Math.max(max, this.shirtSectionCols);
         max = Math.max(max, this.pantsSectionCols);
-        return max;
+        
+        return Math.min(UIConstants.INVENTORY_MAX_COLS, max);
     }
 
     private boolean isGroundVicinityMode() {
@@ -2646,8 +2761,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
                     // Only sync if it's the capability item (not override)
                     if (overrideBackpack.isEmpty()) {
-                        cap.getInventory().setStackInSlot(PlayerBackpack.SLOT_BACKPACK, backpackStack);
-                        syncSlot(PlayerBackpack.SLOT_BACKPACK, backpackStack);
+                        ItemStack clientMirror = getCapabilityMirrorStack(PlayerBackpack.SLOT_BACKPACK, backpackStack);
+                        cap.getInventory().setStackInSlot(PlayerBackpack.SLOT_BACKPACK, backpackStack.copy());
+                        syncCapabilityMirror(PlayerBackpack.SLOT_BACKPACK, clientMirror);
                     }
                 }
                 currentOffset += lastBackpackCap;
@@ -2659,8 +2775,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                     saveSectionToItem(vestStack, currentOffset, lastVestCap);
 
                     if (overrideVest.isEmpty()) {
-                        cap.getInventory().setStackInSlot(PlayerBackpack.SLOT_VEST, vestStack);
-                        syncSlot(PlayerBackpack.SLOT_VEST, vestStack);
+                        ItemStack clientMirror = getCapabilityMirrorStack(PlayerBackpack.SLOT_VEST, vestStack);
+                        cap.getInventory().setStackInSlot(PlayerBackpack.SLOT_VEST, vestStack.copy());
+                        syncCapabilityMirror(PlayerBackpack.SLOT_VEST, clientMirror);
                     }
                 }
                 currentOffset += lastVestCap;
@@ -3023,7 +3140,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     private void ensureCorpseStorageSlotsAdded() {
         if (corpseStorageSlotStart >= 0) return;
         corpseStorageSlotStart = this.slots.size();
-        for (int i = 0; i < 45; i++) {
+        for (int i = 0; i < this.corpseContentHandler.getSlots(); i++) {
             this.addSlot(new TetrisSlot(
                     this.corpseContentHandler,
                     i,
@@ -3066,7 +3183,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         this.lastCorpseVestCap = vestCap;
         this.lastCorpseShirtCap = shirtCap;
         this.lastCorpsePantsCap = pantsCap;
-        this.corpseStorageCapacity = Math.min(45, bpCap + vestCap + shirtCap + pantsCap);
+        this.corpseStorageCapacity = Math.min(this.corpseContentHandler.getSlots(), bpCap + vestCap + shirtCap + pantsCap);
         
         clearCorpseHandler();
         
@@ -3490,7 +3607,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         }
         
         if (!stack.isEmpty() && isCorpseMode() && corpseStorageSlotStart >= 0 && corpseStorageCapacity > 0) {
-            changed |= this.moveItemStackTo(stack, corpseStorageSlotStart, corpseStorageSlotStart + 45, false);
+            changed |= this.moveItemStackTo(stack, corpseStorageSlotStart, corpseStorageSlotStart + this.corpseContentHandler.getSlots(), false);
         }
         
         if (changed) {

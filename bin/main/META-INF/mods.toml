@@ -7,7 +7,7 @@ modId = "${mod_id}"
 version = "${mod_version}"
 displayName = "${mod_name}"
 logoFile = "BlockZ_logo.png"
-displayURL = "github.com/yitian77"
+displayURL = "https://github.com/yitian77/BlockZ"
 authors = "${mod_authors}"
 description = '''${mod_description}'''
 
@@ -23,4 +23,11 @@ modId = "minecraft"
 mandatory = true
 versionRange = "${minecraft_version_range}"
 ordering = "NONE"
+side = "BOTH"
+
+[[dependencies."${mod_id}"]]
+modId = "curios"
+mandatory = false
+versionRange = "[5.0.0.0,)"
+ordering = "AFTER"
 side = "BOTH"

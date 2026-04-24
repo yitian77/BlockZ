@@ -3,6 +3,8 @@ package com.yitianys.BlockZ.event;
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.init.ModEffects;
+import com.yitianys.BlockZ.network.NetworkHandler;
+import com.yitianys.BlockZ.network.SyncPlayerStatusS2C;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -19,14 +21,30 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import com.yitianys.BlockZ.util.PlayerMessageUtils;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraftforge.event.TickEvent;
+
+import net.minecraft.world.entity.Entity;
+
+import com.yitianys.BlockZ.util.DayZPlayerStatusManager;
+import com.yitianys.BlockZ.util.InventoryUtils;
+import net.minecraft.world.entity.vehicle.ContainerEntity;
+import net.minecraftforge.items.IItemHandler;
 
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import com.yitianys.BlockZ.util.PlayerMessageUtils;
+
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
+import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -37,23 +55,11 @@ import com.yitianys.BlockZ.capability.PlayerBackpack;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.init.ModItems;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraftforge.event.TickEvent;
-
-import net.minecraft.world.entity.Entity;
-
-import com.yitianys.BlockZ.util.InventoryUtils;
-import net.minecraft.world.entity.vehicle.ContainerEntity;
-import net.minecraftforge.items.IItemHandler;
 
 @Mod.EventBusSubscriber(modid = BlockZ.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class CommonModEvents {
 
-    private static final float ZOMBIE_BLEEDING_BASE_CHANCE = 0.1F;
+    private static final float ZOMBIE_BLEEDING_BASE_CHANCE = 0.05F;
     private static final int INFINITE_DURATION = 9999999;
     private static final int FRACTURE_RECOVERY_TICKS = 20 * 60 * 5;
 
@@ -72,37 +78,142 @@ public class CommonModEvents {
             0.4444444444D,
             AttributeModifier.Operation.MULTIPLY_TOTAL
     );
+    private static final String CREATIVE_FRACTURE_SPEED_OVERRIDE_TAG = "blockz_creative_fracture_speed_override";
+    private static final String CREATIVE_FRACTURE_BASE_WALK_SPEED_TAG = "blockz_creative_fracture_base_walk_speed";
+    private static final String CREATIVE_FRACTURE_BASE_FLY_SPEED_TAG = "blockz_creative_fracture_base_fly_speed";
+    private static final float FRACTURE_CREATIVE_SPEED_SCALE = 0.45F;
+    private static final float FRACTURE_RECOVERY_CREATIVE_SPEED_SCALE = 0.65F;
+    private static final UUID LOW_HEALTH_SPEED_UUID = UUID.fromString("f732a2bb-9b9a-4b72-871d-2fd86a55b68b");
+
+    // 跳跃体力消耗控制相关
+    private static final String JUMP_TIME_TAG = "blockz_last_jump_time";
+    private static final String JUMP_COUNT_TAG = "blockz_jump_count";
+    private static final long JUMP_RESET_TICKS = 20L; // 1秒内没跳重置计数
+
+    @SubscribeEvent
+    public static void onPlayerJump(LivingEvent.LivingJumpEvent event) {
+        if (event.getEntity() instanceof Player player && !player.level().isClientSide) {
+            long currentTime = player.level().getGameTime();
+            CompoundTag tag = player.getPersistentData();
+            
+            long lastJumpTime = tag.getLong(JUMP_TIME_TAG);
+            int jumpCount = tag.getInt(JUMP_COUNT_TAG);
+            
+            if (currentTime - lastJumpTime > JUMP_RESET_TICKS) {
+                jumpCount = 0; // 重置计数
+            }
+            jumpCount++;
+            tag.putLong(JUMP_TIME_TAG, currentTime);
+            tag.putInt(JUMP_COUNT_TAG, jumpCount);
+            
+            // 只有当连续跳跃超过 2 次时（即第3次及以后），才开始计算并消耗体力
+            if (jumpCount > 2) {
+                float jumpCost = DayZPlayerStatusManager.getJumpStaminaCost();
+                if (!DayZPlayerStatusManager.canJump(player, jumpCost)) {
+                    net.minecraft.world.phys.Vec3 movement = player.getDeltaMovement();
+                    player.setDeltaMovement(0.0D, Math.min(0.0D, movement.y), 0.0D);
+                    player.setSprinting(false);
+                    player.hasImpulse = true;
+                    return;
+                }
+                DayZPlayerStatusManager.consumeStamina(player, jumpCost);
+            }
+        }
+    }
 
     @SubscribeEvent
     public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || event.player.level().isClientSide) return;
-
-        if (!BlockZConfigs.enableNursingSystem.get()) return;
+        if (event.player.level().isClientSide) return;
 
         Player player = event.player;
+        if (event.phase == TickEvent.Phase.START) {
+            if (!DayZPlayerStatusManager.canSprint(player)) {
+                if (player.isSprinting()) {
+                    player.setSprinting(false);
+                }
+                net.minecraft.world.phys.Vec3 movement = player.getDeltaMovement();
+                double horizontalSpeedSqr = movement.x * movement.x + movement.z * movement.z;
+                if (horizontalSpeedSqr > 1.0E-5D) {
+                    player.setDeltaMovement(0.0D, movement.y, 0.0D);
+                    player.hurtMarked = true;
+                }
+            }
+            return;
+        }
+
         Inventory inv = player.getInventory();
+        boolean nursingEnabled = BlockZConfigs.enableNursingSystem.get();
 
-        if (!BlockZConfigs.enableBleeding.get() && player.hasEffect(ModEffects.BLEEDING.get())) {
-            player.removeEffect(ModEffects.BLEEDING.get());
-        }
-        if (!BlockZConfigs.enableBrokenLegs.get() && player.hasEffect(ModEffects.FRACTURE.get())) {
-            player.removeEffect(ModEffects.FRACTURE.get());
+        if (!DayZPlayerStatusManager.canSprint(player)) {
+            if (player.isSprinting()) {
+                player.setSprinting(false);
+            }
+            net.minecraft.world.phys.Vec3 movement = player.getDeltaMovement();
+            double horizontalSpeedSqr = movement.x * movement.x + movement.z * movement.z;
+            if (horizontalSpeedSqr > 1.0E-5D) {
+                player.setDeltaMovement(0.0D, movement.y, 0.0D);
+                player.hurtMarked = true;
+            }
         }
 
-        if (BlockZConfigs.enableBrokenLegs.get()) {
+        DayZPlayerStatusManager.tick(player);
+        applyHealthMovementPenalty(player);
+        if (player instanceof ServerPlayer serverPlayer && player.tickCount % 2 == 0) {
+            syncDayZStatus(serverPlayer);
+        }
+
+        if (player.getAbilities().instabuild) {
+            if (nursingEnabled && player.hasEffect(ModEffects.FRACTURE.get())) {
+                player.removeEffect(ModEffects.FRACTURE.get());
+            }
+            if (nursingEnabled && player.hasEffect(ModEffects.BLEEDING.get())) {
+                player.removeEffect(ModEffects.BLEEDING.get());
+            }
+            AttributeInstance creativeSpeed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+            if (creativeSpeed != null) {
+                clearFractureSpeedModifiers(creativeSpeed);
+                clearHealthSpeedModifier(creativeSpeed);
+            }
+            if (player instanceof ServerPlayer serverPlayer) {
+                restoreCreativeFractureMovement(serverPlayer);
+            }
+        }
+
+        boolean brokenLegsEnabled = nursingEnabled && BlockZConfigs.enableBrokenLegs.get();
+        if (!nursingEnabled) {
+            if (player.hasEffect(ModEffects.BLEEDING.get())) {
+                player.removeEffect(ModEffects.BLEEDING.get());
+            }
+            if (player.hasEffect(ModEffects.FRACTURE.get())) {
+                player.removeEffect(ModEffects.FRACTURE.get());
+            }
+            AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+            if (speed != null) {
+                clearFractureSpeedModifiers(speed);
+            }
+            if (player instanceof ServerPlayer serverPlayer) {
+                restoreCreativeFractureMovement(serverPlayer);
+            }
+        } else {
+            if (!BlockZConfigs.enableBleeding.get() && player.hasEffect(ModEffects.BLEEDING.get())) {
+                player.removeEffect(ModEffects.BLEEDING.get());
+            }
+            if (!brokenLegsEnabled && player.hasEffect(ModEffects.FRACTURE.get())) {
+                player.removeEffect(ModEffects.FRACTURE.get());
+            }
+        }
+
+        if (nursingEnabled && brokenLegsEnabled) {
             MobEffectInstance fractureInstance = player.getEffect(ModEffects.FRACTURE.get());
             boolean fractured = fractureInstance != null;
             boolean analgesic = player.hasEffect(ModEffects.ANALGESIC.get());
             boolean recovering = fractured && fractureInstance.getDuration() <= FRACTURE_RECOVERY_TICKS;
             AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
             if (speed != null) {
-                if (!fractured) {
-                    if (speed.getModifier(ANALGESIC_FRACTURE_SPEED_UUID) != null) {
-                        speed.removeModifier(ANALGESIC_FRACTURE_SPEED_UUID);
-                    }
-                    if (speed.getModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID) != null) {
-                        speed.removeModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID);
-                    }
+                if (player.getAbilities().instabuild) {
+                    clearFractureSpeedModifiers(speed);
+                } else if (!fractured) {
+                    clearFractureSpeedModifiers(speed);
                 } else if (analgesic) {
                     if (speed.getModifier(ANALGESIC_FRACTURE_SPEED_UUID) == null) {
                         speed.addTransientModifier(ANALGESIC_FRACTURE_SPEED_MODIFIER);
@@ -123,6 +234,9 @@ public class CommonModEvents {
                     }
                 }
             }
+            updateCreativeFractureMovement(player, fractured, analgesic, recovering);
+        } else if (player instanceof ServerPlayer serverPlayer) {
+            restoreCreativeFractureMovement(serverPlayer);
         }
         
         // 全局清理：热栏(0-8)、副手(40)、护甲栏(36-39)等不应该出现锁定物品
@@ -202,10 +316,59 @@ public class CommonModEvents {
         }
     }
 
+    private static void clearFractureSpeedModifiers(AttributeInstance speed) {
+        if (speed.getModifier(ANALGESIC_FRACTURE_SPEED_UUID) != null) {
+            speed.removeModifier(ANALGESIC_FRACTURE_SPEED_UUID);
+        }
+        if (speed.getModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID) != null) {
+            speed.removeModifier(SPLINT_FRACTURE_RECOVERY_SPEED_UUID);
+        }
+    }
+
+    private static void clearHealthSpeedModifier(AttributeInstance speed) {
+        if (speed.getModifier(LOW_HEALTH_SPEED_UUID) != null) {
+            speed.removeModifier(LOW_HEALTH_SPEED_UUID);
+        }
+    }
+
+    private static void applyHealthMovementPenalty(Player player) {
+        AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (speed == null) {
+            return;
+        }
+
+        if (player.isSpectator() || player.getAbilities().instabuild) {
+            clearHealthSpeedModifier(speed);
+            return;
+        }
+
+        clearHealthSpeedModifier(speed);
+        double amount = DayZPlayerStatusManager.getMovementPenaltyMultiplier(player);
+        if (amount >= 0.0D) {
+            return;
+        }
+
+        speed.addTransientModifier(new AttributeModifier(
+                LOW_HEALTH_SPEED_UUID,
+                "blockz_low_health_speed",
+                amount,
+                AttributeModifier.Operation.MULTIPLY_TOTAL
+        ));
+    }
+
+    private static void syncDayZStatus(ServerPlayer player) {
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncPlayerStatusS2C(
+                DayZPlayerStatusManager.getHealthPointsRatio(player),
+                DayZPlayerStatusManager.getHealthRatio(player),
+                DayZPlayerStatusManager.getStaminaRatio(player),
+                DayZPlayerStatusManager.getInfectionRatio(player)
+        ));
+    }
+
     @SubscribeEvent(priority = EventPriority.HIGH)
     public static void onLivingFall(LivingFallEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (player.isCreative() || player.isSpectator()) return;
+        if (player.isSpectator()) return;
         if (!BlockZConfigs.enableNursingSystem.get()) return;
 
         if (!BlockZConfigs.enableBrokenLegs.get()) return;
@@ -237,9 +400,13 @@ public class CommonModEvents {
     @SubscribeEvent(priority = EventPriority.HIGH)
     public static void onLivingHurt(LivingHurtEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (!BlockZConfigs.enableNursingSystem.get()) return;
         if (player.isCreative() || player.isSpectator()) return;
         if (event.getAmount() <= 0.0F) return;
+
+        DayZPlayerStatusManager.applyDamage(player, event.getAmount());
+        syncDayZStatus(player);
+
+        if (!BlockZConfigs.enableNursingSystem.get()) return;
 
         if (!BlockZConfigs.enableBleeding.get()) return;
 
@@ -263,6 +430,56 @@ public class CommonModEvents {
                 && player.addEffect(new MobEffectInstance(ModEffects.BLEEDING.get(), INFINITE_DURATION, 0, false, false, true))) {
             PlayerMessageUtils.sendActionbar(player, Component.translatable("msg.blockz.wound_from_attack"));
         }
+    }
+
+    private static void updateCreativeFractureMovement(Player player, boolean fractured, boolean analgesic, boolean recovering) {
+        if (!(player instanceof ServerPlayer serverPlayer)) {
+            return;
+        }
+
+        if (!player.getAbilities().instabuild) {
+            restoreCreativeFractureMovement(serverPlayer);
+            return;
+        }
+
+        if (!fractured) {
+            restoreCreativeFractureMovement(serverPlayer);
+            return;
+        }
+
+        if (!player.getPersistentData().getBoolean(CREATIVE_FRACTURE_SPEED_OVERRIDE_TAG)) {
+            player.getPersistentData().putBoolean(CREATIVE_FRACTURE_SPEED_OVERRIDE_TAG, true);
+            player.getPersistentData().putFloat(CREATIVE_FRACTURE_BASE_WALK_SPEED_TAG, player.getAbilities().getWalkingSpeed());
+            player.getPersistentData().putFloat(CREATIVE_FRACTURE_BASE_FLY_SPEED_TAG, player.getAbilities().getFlyingSpeed());
+        }
+
+        float baseWalkSpeed = player.getPersistentData().getFloat(CREATIVE_FRACTURE_BASE_WALK_SPEED_TAG);
+        float baseFlySpeed = player.getPersistentData().getFloat(CREATIVE_FRACTURE_BASE_FLY_SPEED_TAG);
+        float speedScale = analgesic ? 1.0F : (recovering ? FRACTURE_RECOVERY_CREATIVE_SPEED_SCALE : FRACTURE_CREATIVE_SPEED_SCALE);
+        float targetWalkSpeed = baseWalkSpeed * speedScale;
+        float targetFlySpeed = baseFlySpeed * speedScale;
+
+        if (Math.abs(player.getAbilities().getWalkingSpeed() - targetWalkSpeed) > 1.0E-4F
+                || Math.abs(player.getAbilities().getFlyingSpeed() - targetFlySpeed) > 1.0E-4F) {
+            player.getAbilities().setWalkingSpeed(targetWalkSpeed);
+            player.getAbilities().setFlyingSpeed(targetFlySpeed);
+            serverPlayer.onUpdateAbilities();
+        }
+    }
+
+    private static void restoreCreativeFractureMovement(ServerPlayer player) {
+        if (!player.getPersistentData().getBoolean(CREATIVE_FRACTURE_SPEED_OVERRIDE_TAG)) {
+            return;
+        }
+
+        float baseWalkSpeed = player.getPersistentData().getFloat(CREATIVE_FRACTURE_BASE_WALK_SPEED_TAG);
+        float baseFlySpeed = player.getPersistentData().getFloat(CREATIVE_FRACTURE_BASE_FLY_SPEED_TAG);
+        player.getAbilities().setWalkingSpeed(baseWalkSpeed);
+        player.getAbilities().setFlyingSpeed(baseFlySpeed);
+        player.onUpdateAbilities();
+        player.getPersistentData().remove(CREATIVE_FRACTURE_SPEED_OVERRIDE_TAG);
+        player.getPersistentData().remove(CREATIVE_FRACTURE_BASE_WALK_SPEED_TAG);
+        player.getPersistentData().remove(CREATIVE_FRACTURE_BASE_FLY_SPEED_TAG);
     }
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
@@ -296,14 +513,13 @@ public class CommonModEvents {
         // 这里只针对我们“必须强制换成 DayZ 布局”的方块做拦截：
         // - Lootr：需要通过 Lootr API 获取虚拟容器
         // - 工作台 / 附魔台：需要自定义 DayZ 工作台/附魔布局
-        // 普通箱子、一般容器交给原版或其它模组先打开，再由 openMenu Mixin / 客户端拦截转换为 DayZ UI，
+        // 普通箱子、一般容器交给原版或其它模组先打开，再由客户端拦截转换为 DayZ UI，
         // 以避免抢占右键事件导致虚拟容器模组逻辑失效。
         boolean isLootrContainer = isLootr;
         boolean isCraftingTable = level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.CraftingTableBlock;
         boolean isEnchantingTable = level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.EnchantmentTableBlock;
-        boolean isChest = level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.ChestBlock;
 
-        if (isLootrContainer || isCraftingTable || isEnchantingTable || isChest) {
+        if (isLootrContainer || isCraftingTable || isEnchantingTable) {
             event.setCanceled(true);
             event.setUseBlock(net.minecraftforge.eventbus.api.Event.Result.DENY);
 

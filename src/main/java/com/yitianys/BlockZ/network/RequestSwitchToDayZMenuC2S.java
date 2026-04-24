@@ -94,7 +94,7 @@ public class RequestSwitchToDayZMenuC2S {
                 
                 // Open new DayZInventoryMenu with the same container
                 NetworkHooks.openScreen(player, new SimpleMenuProvider(
-                    (id, inv, p) -> new DayZInventoryMenu(id, inv, container),
+                    (id, inv, p) -> new DayZInventoryMenu(id, inv, container, false),
                     msg.title
                 ), buf -> {
                     buf.writeInt(com.yitianys.BlockZ.config.BlockZConfigs.initialPocketSlots.get());

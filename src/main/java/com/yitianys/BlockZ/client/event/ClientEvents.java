@@ -1,28 +1,37 @@
 package com.yitianys.BlockZ.client.event;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.client.ClientSettings;
 import com.yitianys.BlockZ.config.BlockZConfigs;
+import com.yitianys.BlockZ.entity.DayZZombieEntity;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.OpenDayZMenuC2S;
+import com.yitianys.BlockZ.util.DayZStatsManager;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.InteractionResult;
 import com.yitianys.BlockZ.network.LootPickupC2S;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.Slot;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 
 import com.yitianys.BlockZ.network.RequestSwitchToDayZMenuC2S;
 import com.yitianys.BlockZ.util.InventoryUtils;
@@ -35,23 +44,220 @@ import java.util.Locale;
 
 @Mod.EventBusSubscriber(modid = BlockZ.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ClientEvents {
+    private static final float CLIENT_SPRINT_MIN_STAMINA_RATIO = 0.0F;
+    private static final float EXHAUSTED_STAMINA_THRESHOLD = 0.03F;
+    private static final float HEAVY_BREATHING_THRESHOLD = 0.10F;
+    private static final float EXHAUSTED_RECOVERY_CLEAR_THRESHOLD = 0.25F;
+    private static final int STAMINA_SOUND_NONE = 0;
+    private static final int STAMINA_SOUND_NORMAL = 1;
+    private static final int STAMINA_SOUND_EXHAUSTED = 2;
+    private static float lastStaminaRatio = 1.0f;
+    private static int breathingCooldown = 0;
+    private static boolean exhaustedRecoveryQueued = false;
+    private static net.minecraft.client.resources.sounds.SoundInstance activeStaminaSound = null;
+    private static int activeStaminaSoundType = STAMINA_SOUND_NONE;
+
     // onRegisterGuiOverlays 移到了 ModBusClientEvents
+
+    @SubscribeEvent
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
+        com.yitianys.BlockZ.client.gui.mainmenu.DayZMainMenuScreen.tickMenuMusic();
+    }
+
+    @SubscribeEvent
+    public static void onClientPlayerTick(TickEvent.PlayerTickEvent event) {
+        if (event.phase != TickEvent.Phase.START || !(event.player instanceof LocalPlayer player)) {
+            return;
+        }
+        
+        // 更新本地统计数据
+        DayZStatsManager.update(player);
+
+        // 体力呼吸声逻辑
+        if (ClientSettings.dayzEnabled && BlockZConfigs.enableStaminaSystem.get()) {
+            float staminaRatio = ClientSettings.staminaRatio;
+            Minecraft mc = Minecraft.getInstance();
+            if (activeStaminaSound != null && !mc.getSoundManager().isActive(activeStaminaSound)) {
+                activeStaminaSound = null;
+                activeStaminaSoundType = STAMINA_SOUND_NONE;
+            }
+            if (staminaRatio <= EXHAUSTED_STAMINA_THRESHOLD && lastStaminaRatio > EXHAUSTED_STAMINA_THRESHOLD) {
+                exhaustedRecoveryQueued = true;
+            }
+
+            if (breathingCooldown > 0) {
+                breathingCooldown--;
+            }
+
+            boolean staminaRecovering = staminaRatio > lastStaminaRatio;
+            int desiredSoundType = STAMINA_SOUND_NONE;
+            if (staminaRatio < HEAVY_BREATHING_THRESHOLD || (exhaustedRecoveryQueued && staminaRecovering && staminaRatio < EXHAUSTED_RECOVERY_CLEAR_THRESHOLD)) {
+                desiredSoundType = STAMINA_SOUND_EXHAUSTED;
+            } else if (staminaRatio < 0.80f && staminaRecovering) {
+                desiredSoundType = STAMINA_SOUND_NORMAL;
+            }
+
+            if (desiredSoundType == STAMINA_SOUND_NONE) {
+                if (staminaRatio >= 0.80f || staminaRatio >= EXHAUSTED_RECOVERY_CLEAR_THRESHOLD) {
+                    exhaustedRecoveryQueued = false;
+                }
+                stopActiveStaminaSound(mc);
+            } else {
+                boolean forceSwitch = desiredSoundType > activeStaminaSoundType;
+                boolean needsStart = activeStaminaSound == null || forceSwitch || desiredSoundType != activeStaminaSoundType;
+                if (needsStart && (forceSwitch || breathingCooldown <= 0)) {
+                    playStaminaBreathing(mc, desiredSoundType, staminaRatio);
+                    breathingCooldown = desiredSoundType == STAMINA_SOUND_EXHAUSTED ? 6 : 12;
+                }
+            }
+            lastStaminaRatio = staminaRatio;
+        } else {
+            resetStaminaBreathingState();
+        }
+
+        if (player.isCreative() || player.isSpectator()) {
+            return;
+        }
+        if (ClientSettings.staminaRatio <= CLIENT_SPRINT_MIN_STAMINA_RATIO) {
+            if (player.isSprinting()) {
+                player.setSprinting(false);
+            }
+            if (player.getDeltaMovement().horizontalDistanceSqr() > 1.0E-5D) {
+                player.setDeltaMovement(0.0D, player.getDeltaMovement().y, 0.0D);
+            }
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft.options.keySprint.isDown()) {
+                minecraft.options.keySprint.setDown(false);
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onClientPlayerLoggedIn(ClientPlayerNetworkEvent.LoggingIn event) {
+        DayZStatsManager.load();
+        DayZStatsManager.resetSession();
+        
+        // 进入游戏时彻底停止主菜单音乐
+        com.yitianys.BlockZ.client.gui.mainmenu.DayZMainMenuScreen.stopMenuMusic();
+        resetStaminaBreathingState();
+    }
+
+    @SubscribeEvent
+    public static void onClientPlayerLoggedOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        DayZStatsManager.save();
+        resetStaminaBreathingState();
+    }
+
+    private static void playStaminaBreathing(Minecraft mc, int soundType, float staminaRatio) {
+        stopActiveStaminaSound(mc);
+        net.minecraft.sounds.SoundEvent sound = soundType == STAMINA_SOUND_EXHAUSTED
+                ? com.yitianys.BlockZ.init.ModSounds.PLAYER_STAMINA_REGEN_EXHAUSTED.get()
+                : com.yitianys.BlockZ.init.ModSounds.PLAYER_STAMINA_REGEN_NORMAL.get();
+        activeStaminaSound = net.minecraft.client.resources.sounds.SimpleSoundInstance.forLocalAmbience(
+                sound,
+                1.0f + (0.5f - staminaRatio) * 0.2f,
+                0.45f
+        );
+        mc.getSoundManager().play(activeStaminaSound);
+        activeStaminaSoundType = soundType;
+        if (soundType == STAMINA_SOUND_EXHAUSTED && staminaRatio >= EXHAUSTED_RECOVERY_CLEAR_THRESHOLD) {
+            exhaustedRecoveryQueued = false;
+        }
+    }
+
+    private static void stopActiveStaminaSound(Minecraft mc) {
+        if (mc != null && activeStaminaSound != null) {
+            mc.getSoundManager().stop(activeStaminaSound);
+        }
+        activeStaminaSound = null;
+        activeStaminaSoundType = STAMINA_SOUND_NONE;
+    }
+
+    private static void resetStaminaBreathingState() {
+        breathingCooldown = 0;
+        exhaustedRecoveryQueued = false;
+        lastStaminaRatio = 1.0f;
+        stopActiveStaminaSound(Minecraft.getInstance());
+    }
+
+    @SubscribeEvent
+    public static void onClientLivingDeath(LivingDeathEvent event) {
+        if (!event.getEntity().level().isClientSide) {
+            return;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        LocalPlayer localPlayer = minecraft.player;
+        if (localPlayer == null) {
+            return;
+        }
+
+        if (event.getSource().getEntity() != localPlayer) {
+            return;
+        }
+
+        Entity killed = event.getEntity();
+        if (killed instanceof DayZZombieEntity || killed instanceof net.minecraft.world.entity.monster.Zombie) {
+            DayZStatsManager.addZombieKill();
+        } else if (killed instanceof Player && killed != localPlayer) {
+            DayZStatsManager.addPlayerKill();
+        }
+    }
 
     @SubscribeEvent
     public static void onRenderGuiOverlayPre(RenderGuiOverlayEvent.Pre event) {
         if (ClientSettings.dayzEnabled && BlockZConfigs.showDayzHud.get()) {
+            // 在 DayZ 模式下，我们在隐藏原版 UI 之前先渲染暗角，这样暗角就在 DayZ UI 的底层
+            renderWastelandVignette(event);
+
             // 隐藏原版快捷栏、经验条、生命、饥饿等，以及手持物品名称
+            String path = event.getOverlay().id().getPath().toLowerCase(Locale.ROOT);
             if (event.getOverlay().id().equals(VanillaGuiOverlay.HOTBAR.id()) ||
                 event.getOverlay().id().equals(VanillaGuiOverlay.EXPERIENCE_BAR.id()) ||
-                event.getOverlay().id().equals(VanillaGuiOverlay.FOOD_LEVEL.id()) ||
                 event.getOverlay().id().equals(VanillaGuiOverlay.PLAYER_HEALTH.id()) ||
+                event.getOverlay().id().equals(VanillaGuiOverlay.FOOD_LEVEL.id()) ||
                 event.getOverlay().id().equals(VanillaGuiOverlay.ARMOR_LEVEL.id()) ||
+                event.getOverlay().id().equals(VanillaGuiOverlay.AIR_LEVEL.id()) ||
                 event.getOverlay().id().equals(VanillaGuiOverlay.ITEM_NAME.id()) ||
-                event.getOverlay().id().equals(VanillaGuiOverlay.POTION_ICONS.id()) ||
-                event.getOverlay().id().getNamespace().equals("thirst")) {
+                path.contains("thirst") || path.contains("hydration")) { // 拦截第三方饮水模组的 overlay
                 event.setCanceled(true);
             }
         }
+    }
+
+    @SubscribeEvent
+    public static void onRenderGuiOverlayPost(RenderGuiOverlayEvent.Post event) {
+        // 在非 DayZ 模式下，我们在原版 HOTBAR 之后渲染暗角，使其在最顶层
+        if (!ClientSettings.dayzEnabled || !BlockZConfigs.showDayzHud.get()) {
+            if (event.getOverlay().id().equals(VanillaGuiOverlay.HOTBAR.id())) {
+                renderWastelandVignette(event);
+            }
+        }
+    }
+
+    private static void renderWastelandVignette(RenderGuiOverlayEvent event) {
+        if (!BlockZConfigs.enableVignette.get()) return;
+        
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.options.hideGui) return;
+
+        float strength = BlockZConfigs.vignetteStrength.get().floatValue();
+        if (strength <= 0.0F) return;
+
+        GuiGraphics g = event.getGuiGraphics();
+        int w = g.guiWidth();
+        int h = g.guiHeight();
+        int band = Math.max(1, (int) (h * 0.22F));
+
+        int alpha = Math.max(0, Math.min(255, (int) (strength * 200.0F)));
+        int darkColor = alpha << 24;
+        
+        RenderSystem.enableBlend();
+        g.fillGradient(0, 0, w, band, darkColor, 0);
+        g.fillGradient(0, h - band, w, h, 0, darkColor);
     }
 
     private static boolean isArclightServer() {
@@ -175,14 +381,7 @@ public class ClientEvents {
                 }
 
                 NetworkHandler.CHANNEL.sendToServer(new RequestSwitchToDayZMenuC2S(containerScreen.getTitle()));
-
-                if (containerScreen.getMenu() instanceof ChestMenu chestMenu) {
-                    event.setNewScreen(new com.yitianys.BlockZ.client.gui.DayZChestScreen(
-                            chestMenu,
-                            mc.player.getInventory(),
-                            containerScreen.getTitle()
-                    ));
-                } else if (!isArclightServer()) {
+                if (!isArclightServer()) {
                     event.setCanceled(true);
                 }
             }

@@ -3,22 +3,29 @@ package com.yitianys.BlockZ.event;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
 import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
+import com.yitianys.BlockZ.config.DayZZombieConfig;
 import com.yitianys.BlockZ.entity.CorpseEntity;
+import com.yitianys.BlockZ.entity.DayZZombieEntity;
 import com.yitianys.BlockZ.network.DayzTogglePermissionS2C;
 import com.yitianys.BlockZ.network.DayzToggleStateS2C;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.SyncBackpackS2C;
+import com.yitianys.BlockZ.network.SyncGridRulesS2C;
+import com.yitianys.BlockZ.network.SyncPlayerStatusS2C;
 import com.yitianys.BlockZ.init.ModItems;
+import com.yitianys.BlockZ.util.DayZPlayerStatusManager;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameRules;
 import net.minecraftforge.event.AttachCapabilitiesEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
+import net.minecraftforge.event.entity.living.MobSpawnEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.Clone;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerRespawnEvent;
@@ -39,15 +46,7 @@ public class ModEvents {
     public static void onPlayerLoggedIn(PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             CuriosIntegration.importToCapability(player);
-            player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-                for (int i = 0; i < 4; i++) {
-                    ItemStack stack = cap.getInventory().getStackInSlot(i);
-                    NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncBackpackS2C(i, stack));
-                }
-                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzToggleStateS2C(cap.isDayzEnabled()));
-            });
-            boolean allowed = BlockZConfigs.allowPlayerToggleDayz.get() || player.hasPermissions(2);
-            NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzTogglePermissionS2C(allowed));
+            syncPlayerState(player);
         }
     }
 
@@ -55,16 +54,29 @@ public class ModEvents {
     public static void onPlayerRespawn(PlayerRespawnEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             CuriosIntegration.importToCapability(player);
-            player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
-                for (int i = 0; i < 4; i++) {
-                    ItemStack stack = cap.getInventory().getStackInSlot(i);
-                    NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncBackpackS2C(i, stack));
-                }
-                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzToggleStateS2C(cap.isDayzEnabled()));
-            });
-            boolean allowed = BlockZConfigs.allowPlayerToggleDayz.get() || player.hasPermissions(2);
-            NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzTogglePermissionS2C(allowed));
+            syncPlayerState(player);
         }
+    }
+
+    private static void syncPlayerState(ServerPlayer player) {
+        DayZPlayerStatusManager.ensureInitialized(player);
+        player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
+            for (int i = 0; i < 4; i++) {
+                ItemStack stack = cap.getInventory().getStackInSlot(i);
+                NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncBackpackS2C(i, stack));
+            }
+            NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzToggleStateS2C(cap.isDayzEnabled()));
+        });
+
+        boolean allowed = BlockZConfigs.allowPlayerToggleDayz.get() || player.hasPermissions(2);
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzTogglePermissionS2C(allowed));
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), SyncGridRulesS2C.createServerSnapshot());
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncPlayerStatusS2C(
+                DayZPlayerStatusManager.getHealthPointsRatio(player),
+                DayZPlayerStatusManager.getHealthRatio(player),
+                DayZPlayerStatusManager.getStaminaRatio(player),
+                DayZPlayerStatusManager.getInfectionRatio(player)
+        ));
     }
 
     @SubscribeEvent
@@ -87,6 +99,12 @@ public class ModEvents {
                 }
             });
         });
+
+        if (!event.isWasDeath()) {
+            DayZPlayerStatusManager.copyPersistentStatus(event.getOriginal(), event.getEntity());
+        } else {
+            DayZPlayerStatusManager.reset(event.getEntity());
+        }
     }
 
     @SubscribeEvent
@@ -132,8 +150,8 @@ public class ModEvents {
                     corpse.setItem(9 + i, player.getInventory().items.get(i).copy());
                 }
 
-                int pocketCount = BlockZConfigs.initialPocketSlots.get();
-                int maxCorpsePockets = Math.max(0, corpse.getContainerSize() - 18);
+                int pocketCount = player.getInventory().items.size() - 9; // 获取玩家所有非快捷栏格子 (通常是 27 个或更多)
+                int maxCorpsePockets = corpse.getContainerSize() - 18;
                 int transferCount = Math.min(pocketCount, maxCorpsePockets);
                 for (int i = 0; i < transferCount; i++) {
                     corpse.setItem(18 + i, player.getInventory().items.get(9 + i).copy());
@@ -169,6 +187,21 @@ public class ModEvents {
                     event.getDrops().clear();
                 }
             }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onFinalizeSpawn(MobSpawnEvent.FinalizeSpawn event) {
+        if (!(event.getEntity() instanceof DayZZombieEntity)) {
+            return;
+        }
+        if (DayZZombieConfig.enableNaturalSpawn.get()) {
+            return;
+        }
+
+        MobSpawnType spawnType = event.getSpawnType();
+        if (spawnType == MobSpawnType.NATURAL || spawnType == MobSpawnType.CHUNK_GENERATION) {
+            event.setSpawnCancelled(true);
         }
     }
 }
