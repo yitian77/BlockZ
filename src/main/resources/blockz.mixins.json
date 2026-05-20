@@ -5,13 +5,37 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "blockz.refmap.json",
   "mixins": [
-    "MixinSlot"
+    "MixinAbstractGunItem",
+    "MixinClientMessagePlayerShoot",
+    "MixinLivingEntityReload",
+    "MixinLivingEntityShoot",
+    "MixinModernKineticGunScriptAPI",
+    "MixinSlot",
+    "MixinPlayer"
   ],
   "client": [
     "client.MixinPlayerRenderer",
+    "client.MixinPlayerRendererFirstPersonOffset",
+    "client.MixinHumanoidModelProne",
+    "client.MixinOptionsSecondPerson",
     "client.MixinTitleScreen",
     "client.MixinMusicManager",
-    "client.MixinAbstractContainerScreen"
+    "client.MixinAbstractContainerScreen",
+    "client.MixinCameraLean",
+    "client.MixinClientMessagePlayerShootClient",
+    "client.MixinGameRendererLean",
+    "client.MixinGameRendererWalkSway",
+    "client.MixinLevelRendererFirstPersonBody",
+    "client.MixinPlayerRenderLean",
+    "client.MixinItemInHandRendererLean",
+    "client.MixinItemInHandLayerFirstPersonBody",
+    "client.MixinHumanoidArmorLayerFirstPersonBody",
+    "client.MixinTaczGunLean",
+    "client.MixinEntityRenderDispatcherFirstPersonBody",
+    "client.MixinEntityRenderDispatcherLean",
+    "client.MixinRenderHeadShotAABBLean",
+    "MixinLocalPlayerReload",
+    "MixinGunHudOverlay"
   ],
   "injectors": {
     "defaultRequire": 1

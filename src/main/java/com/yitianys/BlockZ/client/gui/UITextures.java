@@ -57,6 +57,7 @@ public class UITextures {
     public static final ResourceLocation HUD_NOISE_3 = new ResourceLocation("blockz", "textures/gui/hub/noise_outline_3.png");
     public static final ResourceLocation HUD_NOISE_4 = new ResourceLocation("blockz", "textures/gui/hub/noise_outline_4.png");
     public static final ResourceLocation HUD_SQUAT = new ResourceLocation("blockz", "textures/gui/hub/squat.png");
+    public static final ResourceLocation HUD_STANCE_PRONE = new ResourceLocation("blockz", "textures/gui/hub/stance_prone.png");
 
     public static final ResourceLocation HUD_TREND_UP_1 = new ResourceLocation("blockz", "textures/gui/hub/trend_up_1.png");
     public static final ResourceLocation HUD_TREND_UP_2 = new ResourceLocation("blockz", "textures/gui/hub/trend_up_2.png");
@@ -79,6 +80,7 @@ public class UITextures {
     public static final ResourceLocation MAIN_MENU_POSTER_0 = new ResourceLocation("blockz", "textures/gui/mainmenu/poster_0.png");
     public static final ResourceLocation MAIN_MENU_POSTER_1 = new ResourceLocation("blockz", "textures/gui/mainmenu/poster_1.png");
     public static final ResourceLocation MAIN_MENU_POSTER_2 = new ResourceLocation("blockz", "textures/gui/mainmenu/poster_2.png");
+    public static final ResourceLocation ICON_BACKERS = new ResourceLocation("blockz", "textures/gui/mainmenu/icon_backers.png");
     public static final ResourceLocation ICON_OPTIONS = new ResourceLocation("blockz", "textures/gui/mainmenu/icon_options.png");
     public static final ResourceLocation ICON_EXIT = new ResourceLocation("blockz", "textures/gui/mainmenu/icon_exit.png");
     public static final ResourceLocation ICON_DISCORD = new ResourceLocation("blockz", "textures/gui/mainmenu/icon_discord.png");

@@ -14,7 +14,7 @@ public class MixinTitleScreen {
     @Inject(method = "init", at = @At("HEAD"), cancellable = true)
     private void blockz$onInit(CallbackInfo ci) {
         Minecraft mc = Minecraft.getInstance();
-        if (BlockZConfigs.enableCustomMainMenu != null && !BlockZConfigs.enableCustomMainMenu.get()) {
+        if (!BlockZConfigs.isCustomMainMenuEnabled()) {
             return;
         }
         if (mc != null) {

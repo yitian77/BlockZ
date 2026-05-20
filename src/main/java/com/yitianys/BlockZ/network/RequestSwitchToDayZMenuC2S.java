@@ -1,5 +1,7 @@
 package com.yitianys.BlockZ.network;
 
+import com.yitianys.BlockZ.compat.CuriosIntegration;
+import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.util.ItemHandlerContainer;
 import net.minecraft.network.FriendlyByteBuf;
@@ -44,6 +46,7 @@ public class RequestSwitchToDayZMenuC2S {
         ctx.enqueueWork(() -> {
             ServerPlayer player = ctx.getSender();
             if (player == null) return;
+            if (!BlockZConfigs.isDayzInventoryEnabled()) return;
             
             // Check current open container
             AbstractContainerMenu menu = player.containerMenu;
@@ -97,7 +100,7 @@ public class RequestSwitchToDayZMenuC2S {
                     (id, inv, p) -> new DayZInventoryMenu(id, inv, container, false),
                     msg.title
                 ), buf -> {
-                    buf.writeInt(com.yitianys.BlockZ.config.BlockZConfigs.initialPocketSlots.get());
+                    buf.writeInt(com.yitianys.BlockZ.config.BlockZConfigs.getInitialPocketSlots());
                     buf.writeBoolean(false); // No Pos
                     // New Protocol:
                     // boolean hasPos (false)
@@ -105,6 +108,7 @@ public class RequestSwitchToDayZMenuC2S {
                     // int containerSize
                     buf.writeByte(2); // Type: Virtual Container
                     buf.writeInt(container.getContainerSize());
+                    CuriosIntegration.writeAdditionalDayZSlotRefs(player, buf);
                 });
             } else {
                 // 如果找不到 Container，可能是纯逻辑 Menu，无法转换

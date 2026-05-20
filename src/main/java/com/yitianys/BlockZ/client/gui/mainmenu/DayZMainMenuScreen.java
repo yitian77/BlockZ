@@ -23,6 +23,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nonnull;
+import org.lwjgl.glfw.GLFW;
 
 public class DayZMainMenuScreen extends Screen {
     private static final Component PLAY_TEXT = Component.literal("开始游戏");
@@ -69,9 +70,9 @@ public class DayZMainMenuScreen extends Screen {
     }
 
     private final PosterData[] posters = new PosterData[]{
-            new PosterData(UITextures.MAIN_MENU_POSTER_0, BlockZConfigs.posterTitle0::get, BlockZConfigs.posterUrl0::get, BlockZConfigs.posterMsg0::get, BlockZConfigs.posterButton0::get),
-            new PosterData(UITextures.MAIN_MENU_POSTER_1, BlockZConfigs.posterTitle1::get, BlockZConfigs.posterUrl1::get, BlockZConfigs.posterMsg1::get, BlockZConfigs.posterButton1::get),
-            new PosterData(UITextures.MAIN_MENU_POSTER_2, BlockZConfigs.posterTitle2::get, BlockZConfigs.posterUrl2::get, BlockZConfigs.posterMsg2::get, BlockZConfigs.posterButton2::get)
+            new PosterData(UITextures.MAIN_MENU_POSTER_0, () -> BlockZConfigs.getPosterTitle(0), () -> BlockZConfigs.getPosterUrl(0), () -> BlockZConfigs.getPosterMessage(0), () -> BlockZConfigs.getPosterButtonText(0)),
+            new PosterData(UITextures.MAIN_MENU_POSTER_1, () -> BlockZConfigs.getPosterTitle(1), () -> BlockZConfigs.getPosterUrl(1), () -> BlockZConfigs.getPosterMessage(1), () -> BlockZConfigs.getPosterButtonText(1)),
+            new PosterData(UITextures.MAIN_MENU_POSTER_2, () -> BlockZConfigs.getPosterTitle(2), () -> BlockZConfigs.getPosterUrl(2), () -> BlockZConfigs.getPosterMessage(2), () -> BlockZConfigs.getPosterButtonText(2))
     };
 
     private final net.minecraft.resources.ResourceLocation[] backgrounds = new net.minecraft.resources.ResourceLocation[]{
@@ -114,7 +115,7 @@ public class DayZMainMenuScreen extends Screen {
             button -> {
                 if (this.minecraft != null) {
                     try {
-                        String addressStr = BlockZConfigs.serverAddress.get();
+                        String addressStr = BlockZConfigs.getServerAddress();
                         ServerData serverData = new ServerData(Component.literal("DayZ Server").getString(), addressStr, false);
                         net.minecraft.client.multiplayer.resolver.ServerAddress address = net.minecraft.client.multiplayer.resolver.ServerAddress.parseString(addressStr);
                         
@@ -168,12 +169,15 @@ public class DayZMainMenuScreen extends Screen {
 
         this.addRenderableWidget(new DayZIconButton(iconX - (iconSize + iconGap) * 3, iconY, iconSize, iconSize, UITextures.ICON_SINGLEPLAYER, 
             button -> { if (this.minecraft != null) this.minecraft.setScreen(new SelectWorldScreen(this)); }, Component.translatable("gui.blockz.mainmenu.singleplayer")));
+
+        this.addRenderableWidget(new DayZIconButton(iconX - (iconSize + iconGap) * 4, iconY, iconSize, iconSize, UITextures.ICON_BACKERS,
+            button -> { if (this.minecraft != null) this.minecraft.setScreen(new DayZBackersScreen(this)); }, Component.translatable("gui.blockz.mainmenu.backers")));
     }
 
     @Override
     public void tick() {
         super.tick();
-        int bgRotationSpeed = BlockZConfigs.mainMenuBackgroundRotationSpeed.get();
+        int bgRotationSpeed = BlockZConfigs.getMainMenuBackgroundRotationSpeed();
         if (bgRotationSpeed > 0) {
             backgroundTimer++;
             if (backgroundTimer >= bgRotationSpeed * 20) {
@@ -183,13 +187,13 @@ public class DayZMainMenuScreen extends Screen {
         }
 
         if (backgroundTransitionProgress < 1.0f) {
-            float transitionStep = (float) BlockZConfigs.mainMenuBackgroundTransitionStep.get().doubleValue();
+            float transitionStep = (float) BlockZConfigs.getMainMenuBackgroundTransitionStep();
             backgroundTransitionProgress += transitionStep;
             if (backgroundTransitionProgress > 1.0f) backgroundTransitionProgress = 1.0f;
         }
 
         // 宣传图轮换逻辑
-        int rotationSpeed = BlockZConfigs.posterRotationSpeed.get();
+        int rotationSpeed = BlockZConfigs.getPosterRotationSpeed();
         if (rotationSpeed > 0) {
             posterTimer++;
             if (posterTimer >= rotationSpeed * 20) { // 秒转 tick
@@ -227,8 +231,28 @@ public class DayZMainMenuScreen extends Screen {
         backgroundTransitionProgress = 0.0f;
     }
 
+    private boolean isWindowHovered() {
+        return this.minecraft != null
+            && this.minecraft.getWindow() != null
+            && GLFW.glfwGetWindowAttrib(this.minecraft.getWindow().getWindow(), GLFW.GLFW_HOVERED) == GLFW.GLFW_TRUE;
+    }
+
+    private int resolveMenuMouseX(int mouseX) {
+        if (!isWindowHovered()) {
+            return this.width / 2;
+        }
+        return Math.max(0, Math.min(this.width, mouseX));
+    }
+
+    private int resolveMenuMouseY(int mouseY) {
+        if (!isWindowHovered()) {
+            return this.height / 2;
+        }
+        return Math.max(0, Math.min(this.height, mouseY));
+    }
+
     private void updateCameraSway(int mouseX, int mouseY) {
-        float strength = (float) BlockZConfigs.mainMenuCameraSwayStrength.get().doubleValue();
+        float strength = (float) BlockZConfigs.getMainMenuCameraSwayStrength();
         float targetX = ((mouseX - (this.width * 0.5f)) / Math.max(1.0f, this.width * 0.5f)) * strength;
         float targetY = ((mouseY - (this.height * 0.5f)) / Math.max(1.0f, this.height * 0.5f)) * strength;
 
@@ -339,10 +363,13 @@ public class DayZMainMenuScreen extends Screen {
 
     @Override
     public void render(@Nonnull GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-        updateCameraSway(mouseX, mouseY);
+        int resolvedMouseX = resolveMenuMouseX(mouseX);
+        int resolvedMouseY = resolveMenuMouseY(mouseY);
+
+        updateCameraSway(resolvedMouseX, resolvedMouseY);
         renderRotatingBackground(guiGraphics);
 
-        renderPlayerModel(guiGraphics, mouseX, mouseY);
+        renderPlayerModel(guiGraphics, resolvedMouseX, resolvedMouseY);
 
         // 渲染烟雾叠层 (在玩家模型之后渲染，使其叠加在模型之上)
         renderSmokeOverlay(guiGraphics, 0, 0, this.width, this.height);
@@ -386,7 +413,7 @@ public class DayZMainMenuScreen extends Screen {
             guiGraphics.drawCenteredString(this.font, feedbackMessage, textX, textY, color);
         }
 
-        super.render(guiGraphics, mouseX, mouseY, partialTick);
+        super.render(guiGraphics, resolvedMouseX, resolvedMouseY, partialTick);
     }
 
     private void renderDayZPoster(GuiGraphics guiGraphics, int x, int y, int w, int h) {
@@ -468,10 +495,9 @@ public class DayZMainMenuScreen extends Screen {
             // 移除 180 度旋转，因为 Z 轴镜像后模型已是正面
             
             float headY = (centerX - mouseX) / 15.0f;
-            float headX = (mouseY - (centerY + 20)) / 15.0f;
             poseStack.mulPose(com.mojang.math.Axis.YP.rotationDegrees(-headY * 0.12f));
 
-            activeModel.head.xRot = headX * ((float)Math.PI / 180F) * 0.55F;
+            activeModel.head.xRot = 0.0F;
             activeModel.head.yRot = headY * ((float)Math.PI / 180F) * 0.55F;
             activeModel.hat.copyFrom(activeModel.head);
 
@@ -561,7 +587,7 @@ public class DayZMainMenuScreen extends Screen {
     }
 
     private static boolean shouldManageMenuMusic(Minecraft minecraft) {
-        return minecraft != null && minecraft.level == null && BlockZConfigs.enableCustomMainMenu.get();
+        return minecraft != null && minecraft.level == null && BlockZConfigs.isCustomMainMenuEnabled();
     }
 
     private static int selectNextMenuTrackIndex() {

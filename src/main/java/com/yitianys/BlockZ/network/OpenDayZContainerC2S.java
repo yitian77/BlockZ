@@ -1,5 +1,6 @@
 package com.yitianys.BlockZ.network;
 
+import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import net.minecraft.core.BlockPos;
@@ -65,6 +66,7 @@ public class OpenDayZContainerC2S {
         ctx.enqueueWork(() -> {
             ServerPlayer player = ctx.getSender();
             if (player == null) return;
+            if (!BlockZConfigs.isDayzInventoryEnabled()) return;
 
             ServerLevel level = player.serverLevel();
 
@@ -78,9 +80,10 @@ public class OpenDayZContainerC2S {
                         (id, inv, p) -> new DayZInventoryMenu(id, inv, msg.pos),
                         title
                 ), buf -> {
-                    buf.writeInt(BlockZConfigs.initialPocketSlots.get());
+                    buf.writeInt(BlockZConfigs.getInitialPocketSlots());
                     buf.writeBoolean(true);
                     buf.writeBlockPos(msg.pos);
+                    CuriosIntegration.writeAdditionalDayZSlotRefs(player, buf);
                 });
                 return;
             }
@@ -94,7 +97,7 @@ public class OpenDayZContainerC2S {
                         (id, inv, p) -> new DayZInventoryMenu(id, inv, entity),
                         title
                 ), buf -> {
-                    buf.writeInt(BlockZConfigs.initialPocketSlots.get());
+                    buf.writeInt(BlockZConfigs.getInitialPocketSlots());
                     buf.writeBoolean(false);
                     // New Protocol:
                     // boolean hasPos (false)
@@ -102,6 +105,7 @@ public class OpenDayZContainerC2S {
                     // int entityId
                     buf.writeByte(1); // Type: Entity
                     buf.writeInt(entity.getId());
+                    CuriosIntegration.writeAdditionalDayZSlotRefs(player, buf);
                 });
             }
         });

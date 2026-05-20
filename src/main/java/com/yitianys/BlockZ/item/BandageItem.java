@@ -24,7 +24,7 @@ public class BandageItem extends MedicalItem {
     public @NotNull InteractionResultHolder<ItemStack> use(@NotNull Level level, @NotNull Player player, @NotNull InteractionHand usedHand) {
         ItemStack stack = player.getItemInHand(usedHand);
         ensureMedicalTags(stack);
-        if (!BlockZConfigs.enableNursingSystem.get() || !BlockZConfigs.enableBleeding.get()) {
+        if (!BlockZConfigs.isNursingEnabled() || !BlockZConfigs.isBleedingEnabled()) {
             return InteractionResultHolder.fail(stack);
         }
         if (!player.hasEffect(ModEffects.BLEEDING.get())) {

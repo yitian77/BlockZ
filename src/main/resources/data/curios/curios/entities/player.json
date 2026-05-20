@@ -3,6 +3,8 @@
   "slots": [
     "head",
     "body",
-    "back"
+    "back",
+    "face",
+    "hands"
   ]
 }

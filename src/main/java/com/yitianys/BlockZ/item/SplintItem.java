@@ -27,7 +27,7 @@ public class SplintItem extends MedicalItem {
     public @NotNull InteractionResultHolder<ItemStack> use(@NotNull Level level, @NotNull Player player, @NotNull InteractionHand usedHand) {
         ItemStack stack = player.getItemInHand(usedHand);
         ensureMedicalTags(stack);
-        if (!BlockZConfigs.enableNursingSystem.get() || !BlockZConfigs.enableBrokenLegs.get()) {
+        if (!BlockZConfigs.isNursingEnabled() || !BlockZConfigs.isBrokenLegsEnabled()) {
             return InteractionResultHolder.fail(stack);
         }
         if (!player.hasEffect(ModEffects.FRACTURE.get())) {

@@ -29,7 +29,7 @@ public class DayzToggleRequestC2S {
         ctx.enqueueWork(() -> {
             ServerPlayer player = ctx.getSender();
             if (player == null) return;
-            boolean allowed = BlockZConfigs.allowPlayerToggleDayz.get() || player.hasPermissions(2);
+            boolean allowed = BlockZConfigs.getAllowPlayerToggleDayz() || player.hasPermissions(2);
             if (!allowed) {
                 player.sendSystemMessage(Component.translatable("msg.blockz.dayz_toggle_denied"));
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzToggleStateS2C(true));

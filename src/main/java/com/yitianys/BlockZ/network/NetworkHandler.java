@@ -86,5 +86,36 @@ public class NetworkHandler {
                 .decoder(RequestSwitchToDayZMenuC2S::decode)
                 .consumerMainThread(RequestSwitchToDayZMenuC2S::handle)
                 .add();
+        id++;
+        CHANNEL.messageBuilder(SyncConfigS2C.class, id, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(SyncConfigS2C::encode)
+                .decoder(SyncConfigS2C::new)
+                .consumerMainThread(SyncConfigS2C::handle)
+                .add();
+        id++;
+        CHANNEL.messageBuilder(LeanUpdateC2S.class, id, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(LeanUpdateC2S::encode)
+                .decoder(LeanUpdateC2S::decode)
+                .consumerMainThread(LeanUpdateC2S::handle)
+                .add();
+        id++;
+        CHANNEL.messageBuilder(LeanSyncS2C.class, id, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(LeanSyncS2C::encode)
+                .decoder(LeanSyncS2C::decode)
+                .consumerMainThread(LeanSyncS2C::handle)
+                .add();
+        id++;
+        CHANNEL.messageBuilder(ProneUpdateC2S.class, id, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(ProneUpdateC2S::encode)
+                .decoder(ProneUpdateC2S::decode)
+                .consumerMainThread(ProneUpdateC2S::handle)
+                .add();
+        id++;
+        CHANNEL.messageBuilder(ProneSyncS2C.class, id, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(ProneSyncS2C::encode)
+                .decoder(ProneSyncS2C::decode)
+                .consumerMainThread(ProneSyncS2C::handle)
+                .add();
+        id++;
     }
 }

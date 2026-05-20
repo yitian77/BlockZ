@@ -14,11 +14,14 @@ import com.yitianys.BlockZ.network.SyncGridRulesS2C;
 import com.yitianys.BlockZ.network.SyncPlayerStatusS2C;
 import com.yitianys.BlockZ.init.ModItems;
 import com.yitianys.BlockZ.util.DayZPlayerStatusManager;
+import com.yitianys.BlockZ.util.ProneManager;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.GameRules;
@@ -27,6 +30,7 @@ import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingDropsEvent;
 import net.minecraftforge.event.entity.living.MobSpawnEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.Clone;
+import net.minecraftforge.event.entity.player.PlayerEvent.StartTracking;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerRespawnEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -35,6 +39,12 @@ import net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.network.PacketDistributor;
+
+import com.yitianys.BlockZ.network.SyncConfigS2C;
+import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @EventBusSubscriber(
         modid = "blockz",
@@ -51,10 +61,31 @@ public class ModEvents {
     }
 
     @SubscribeEvent
+    public static void onPlayerLoggedOut(PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            CommonModEvents.clearStatusSyncCache(player);
+        }
+        if (event.getEntity().level().isClientSide) {
+            BlockZConfigs.clearSyncedValues();
+            DayZZombieConfig.clearSyncedValues();
+        }
+    }
+
+    @SubscribeEvent
     public static void onPlayerRespawn(PlayerRespawnEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             CuriosIntegration.importToCapability(player);
             syncPlayerState(player);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onStartTracking(StartTracking event) {
+        if (!(event.getEntity() instanceof ServerPlayer trackingPlayer)) {
+            return;
+        }
+        if (event.getTarget() instanceof Player trackedPlayer) {
+            ProneManager.syncStateTo(trackingPlayer, trackedPlayer);
         }
     }
 
@@ -68,15 +99,32 @@ public class ModEvents {
             NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzToggleStateS2C(cap.isDayzEnabled()));
         });
 
-        boolean allowed = BlockZConfigs.allowPlayerToggleDayz.get() || player.hasPermissions(2);
+        boolean allowed = BlockZConfigs.getAllowPlayerToggleDayz() || player.hasPermissions(2);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new DayzTogglePermissionS2C(allowed));
-        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), SyncGridRulesS2C.createServerSnapshot());
+        syncServerConfigs(player);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncPlayerStatusS2C(
                 DayZPlayerStatusManager.getHealthPointsRatio(player),
                 DayZPlayerStatusManager.getHealthRatio(player),
                 DayZPlayerStatusManager.getStaminaRatio(player),
                 DayZPlayerStatusManager.getInfectionRatio(player)
         ));
+        ProneManager.syncStateTo(player, player);
+        for (ServerPlayer other : player.server.getPlayerList().getPlayers()) {
+            if (other != player) {
+                ProneManager.syncStateTo(player, other);
+            }
+        }
+    }
+
+    public static void syncServerConfigs(ServerPlayer player) {
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), SyncGridRulesS2C.createServerSnapshot());
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncConfigS2C());
+    }
+
+    public static void broadcastServerConfigs(MinecraftServer server) {
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            syncServerConfigs(player);
+        }
     }
 
     @SubscribeEvent
@@ -102,8 +150,10 @@ public class ModEvents {
 
         if (!event.isWasDeath()) {
             DayZPlayerStatusManager.copyPersistentStatus(event.getOriginal(), event.getEntity());
+            ProneManager.copyPersistentState(event.getOriginal(), event.getEntity());
         } else {
             DayZPlayerStatusManager.reset(event.getEntity());
+            ProneManager.reset(event.getEntity());
         }
     }
 
@@ -111,7 +161,7 @@ public class ModEvents {
     public static void onLivingDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             if (!event.getEntity().level().isClientSide) {
-                boolean corpseEnabled = BlockZConfigs.enableCorpse.get();
+                boolean corpseEnabled = BlockZConfigs.getEnableCorpse();
                 boolean keepInventory = player.level().getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
 
                 if (!corpseEnabled) {
@@ -179,11 +229,29 @@ public class ModEvents {
     @SubscribeEvent
     public static void onLivingDrops(LivingDropsEvent event) {
         LivingEntity living = event.getEntity();
+        if (living instanceof DayZZombieEntity zombie) {
+            if (living.level().isClientSide || DayZZombieConfig.getCorpseStayDuration() <= 0) {
+                return;
+            }
+
+            List<ItemStack> corpseLoot = new ArrayList<>();
+            for (ItemEntity itemEntity : event.getDrops()) {
+                ItemStack stack = itemEntity.getItem();
+                if (!stack.isEmpty()) {
+                    corpseLoot.add(stack.copy());
+                }
+            }
+
+            zombie.absorbCorpseLoot(corpseLoot);
+            event.getDrops().clear();
+            return;
+        }
+
         if (living instanceof Player player) {
             boolean keepInventory = player.level().getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
             if (!player.level().isClientSide && !keepInventory) {
                 event.getDrops().removeIf(itemEntity -> itemEntity.getItem().is(ModItems.LOCK_ITEM.get()));
-                if (BlockZConfigs.enableCorpse.get()) {
+                if (BlockZConfigs.getEnableCorpse()) {
                     event.getDrops().clear();
                 }
             }
@@ -195,7 +263,7 @@ public class ModEvents {
         if (!(event.getEntity() instanceof DayZZombieEntity)) {
             return;
         }
-        if (DayZZombieConfig.enableNaturalSpawn.get()) {
+        if (DayZZombieConfig.isNaturalSpawnEnabled()) {
             return;
         }
 

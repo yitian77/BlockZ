@@ -13,29 +13,30 @@ public final class DayZPlayerStatusManager {
     private static final String STAMINA_TAG = "stamina";
     private static final String INFECTION_TAG = "infection";
     private static final String STAMINA_RECOVERY_DELAY_TAG = "stamina_recovery_delay";
+    private static final String STAMINA_SPRINT_LOCKED_TAG = "stamina_sprint_locked";
 
     public static final float MAX_HEALTH = 100.0F;
     public static final float MAX_INFECTION = 100.0F;
 
     public static float getMaxStamina() {
-        return BlockZConfigs.enableStaminaSystem.get() ? BlockZConfigs.staminaMaxCapacity.get().floatValue() : 100.0F;
+        return BlockZConfigs.isStaminaEnabled() ? (float) BlockZConfigs.getStaminaMaxCapacity() : 100.0F;
     }
 
     public static float getSprintStaminaCost() {
-        return BlockZConfigs.enableStaminaSystem.get() ? BlockZConfigs.staminaSprintCost.get().floatValue() : 0.0F;
+        return BlockZConfigs.isStaminaEnabled() ? (float) BlockZConfigs.getStaminaSprintCost() : 0.0F;
     }
 
     public static float getSwimStaminaCost() {
         // 游泳消耗基于疾跑消耗，加上水中额外惩罚
-        return BlockZConfigs.enableStaminaSystem.get() ? (BlockZConfigs.staminaSprintCost.get().floatValue() + BlockZConfigs.staminaWaterPenalty.get().floatValue()) : 0.0F;
+        return BlockZConfigs.isStaminaEnabled() ? (float) (BlockZConfigs.getStaminaSprintCost() + BlockZConfigs.getStaminaWaterPenalty()) : 0.0F;
     }
 
     public static float getJumpStaminaCost() {
-        return BlockZConfigs.enableStaminaSystem.get() ? BlockZConfigs.staminaJumpCost.get().floatValue() : 0.0F;
+        return BlockZConfigs.isStaminaEnabled() ? (float) BlockZConfigs.getStaminaJumpCost() : 0.0F;
     }
 
     public static float getBaseRecoveryRate() {
-        return BlockZConfigs.enableStaminaSystem.get() ? BlockZConfigs.staminaRecoveryRate.get().floatValue() : getMaxStamina();
+        return BlockZConfigs.isStaminaEnabled() ? (float) BlockZConfigs.getStaminaRecoveryRate() : getMaxStamina();
     }
 
     public static float getIdleRecoveryRate() {
@@ -59,7 +60,8 @@ public final class DayZPlayerStatusManager {
     private static final float STARVATION_HEALTH_LOSS_PER_TICK = 0.010F;
     private static final float PASSIVE_HEALTH_RECOVERY_PER_TICK = 0.010F;
 
-    private static final float SPRINT_MIN_STAMINA = 0.0F;
+    private static final float SPRINT_EXHAUSTED_STAMINA = 1.0F;
+    private static final float SPRINT_RECOVERY_STAMINA = 8.0F;
     private static final int STAMINA_RECOVERY_DELAY_TICKS = 14;
     private static final double MOVEMENT_EPSILON_SQR = 1.0E-4D;
 
@@ -85,6 +87,10 @@ public final class DayZPlayerStatusManager {
             statusTag.putInt(STAMINA_RECOVERY_DELAY_TAG, 0);
             changed = true;
         }
+        if (!statusTag.contains(STAMINA_SPRINT_LOCKED_TAG, Tag.TAG_BYTE)) {
+            statusTag.putBoolean(STAMINA_SPRINT_LOCKED_TAG, false);
+            changed = true;
+        }
         if (changed) {
             saveStatusTag(player, statusTag);
         }
@@ -106,23 +112,30 @@ public final class DayZPlayerStatusManager {
         statusTag.putFloat(STAMINA_TAG, getMaxStamina());
         statusTag.putFloat(INFECTION_TAG, 0.0F);
         statusTag.putInt(STAMINA_RECOVERY_DELAY_TAG, 0);
+        statusTag.putBoolean(STAMINA_SPRINT_LOCKED_TAG, false);
         saveStatusTag(player, statusTag);
     }
 
     public static void tick(Player player) {
+        if (!BlockZConfigs.isHealthSystemEnabled()) {
+            return;
+        }
         ensureInitialized(player);
 
         float health = getHealthValue(player);
         float stamina = getStaminaValue(player);
         int staminaRecoveryDelay = getStaminaRecoveryDelay(player);
+        boolean sprintRecoveryLocked = isSprintRecoveryLocked(player);
 
         if (player.isCreative() || player.isSpectator()) {
             setStaminaValue(player, getMaxStamina());
             setStaminaRecoveryDelay(player, 0);
+            setSprintRecoveryLocked(player, false);
             return;
         }
 
-        if (stamina <= SPRINT_MIN_STAMINA && player.isSprinting()) {
+        sprintRecoveryLocked = updateSprintRecoveryLock(stamina, sprintRecoveryLocked);
+        if (sprintRecoveryLocked && player.isSprinting()) {
             player.setSprinting(false);
         }
 
@@ -177,18 +190,23 @@ public final class DayZPlayerStatusManager {
 
         float nextHealth = clamp(health + healthDelta, 0.0F, MAX_HEALTH);
         float nextStamina = clamp(stamina + staminaDelta, 0.0F, getMaxStamina());
+        sprintRecoveryLocked = updateSprintRecoveryLock(nextStamina, sprintRecoveryLocked);
 
         setHealthValue(player, nextHealth);
         setStaminaValue(player, nextStamina);
         setStaminaRecoveryDelay(player, staminaRecoveryDelay);
+        setSprintRecoveryLocked(player, sprintRecoveryLocked);
 
-        if (nextStamina <= SPRINT_MIN_STAMINA && player.isSprinting()) {
+        if (sprintRecoveryLocked && player.isSprinting()) {
             player.setSprinting(false);
         }
     }
 
     public static void applyDamage(Player player, float damageAmount) {
         if (damageAmount <= 0.0F) {
+            return;
+        }
+        if (!BlockZConfigs.isHealthSystemEnabled()) {
             return;
         }
         ensureInitialized(player);
@@ -202,8 +220,10 @@ public final class DayZPlayerStatusManager {
         }
         ensureInitialized(player);
         float current = getStaminaValue(player);
-        setStaminaValue(player, clamp(current - amount, 0.0F, getMaxStamina()));
+        float nextStamina = clamp(current - amount, 0.0F, getMaxStamina());
+        setStaminaValue(player, nextStamina);
         setStaminaRecoveryDelay(player, STAMINA_RECOVERY_DELAY_TICKS);
+        setSprintRecoveryLocked(player, updateSprintRecoveryLock(nextStamina, isSprintRecoveryLocked(player)));
     }
 
     public static boolean canSprint(Player player) {
@@ -211,7 +231,7 @@ public final class DayZPlayerStatusManager {
             return true;
         }
         ensureInitialized(player);
-        return getStaminaValue(player) > 0.0F;
+        return !isSprintRecoveryLocked(player) && getStaminaValue(player) > getSprintExhaustedThreshold();
     }
 
     public static boolean canJump(Player player, float jumpCost) {
@@ -219,6 +239,9 @@ public final class DayZPlayerStatusManager {
             return true;
         }
         ensureInitialized(player);
+        if (isSprintRecoveryLocked(player)) {
+            return false;
+        }
         return getStaminaValue(player) >= Math.max(getJumpStaminaCost(), jumpCost);
     }
 
@@ -227,6 +250,9 @@ public final class DayZPlayerStatusManager {
     }
 
     public static float getHealthRatio(Player player) {
+        if (!BlockZConfigs.isHealthSystemEnabled()) {
+            return getHealthPointsRatio(player);
+        }
         ensureInitialized(player);
         return clamp(getHealthValue(player) / MAX_HEALTH, 0.0F, 1.0F);
     }
@@ -242,6 +268,9 @@ public final class DayZPlayerStatusManager {
     }
 
     public static float getHealthValue(Player player) {
+        if (!BlockZConfigs.isHealthSystemEnabled()) {
+            return getHealthPointsRatio(player) * MAX_HEALTH;
+        }
         return getValue(player, HEALTH_TAG, MAX_HEALTH);
     }
 
@@ -263,11 +292,24 @@ public final class DayZPlayerStatusManager {
         return statusTag.getInt(STAMINA_RECOVERY_DELAY_TAG);
     }
 
+    public static boolean isSprintRecoveryLocked(Player player) {
+        CompoundTag statusTag = getOrCreateStatusTag(player);
+        if (!statusTag.contains(STAMINA_SPRINT_LOCKED_TAG, Tag.TAG_BYTE)) {
+            statusTag.putBoolean(STAMINA_SPRINT_LOCKED_TAG, false);
+            saveStatusTag(player, statusTag);
+            return false;
+        }
+        return statusTag.getBoolean(STAMINA_SPRINT_LOCKED_TAG);
+    }
+
     public static void setInfectionValue(Player player, float infection) {
         setValue(player, INFECTION_TAG, infection, 0.0F, MAX_INFECTION);
     }
 
     public static double getMovementPenaltyMultiplier(Player player) {
+        if (!BlockZConfigs.isHealthSystemEnabled()) {
+            return 0.0D;
+        }
         float health = getHealthValue(player);
         if (health <= 15.0F) {
             return -0.35D;
@@ -292,6 +334,12 @@ public final class DayZPlayerStatusManager {
     private static void setStaminaRecoveryDelay(Player player, int ticks) {
         CompoundTag statusTag = getOrCreateStatusTag(player);
         statusTag.putInt(STAMINA_RECOVERY_DELAY_TAG, Math.max(0, ticks));
+        saveStatusTag(player, statusTag);
+    }
+
+    private static void setSprintRecoveryLocked(Player player, boolean locked) {
+        CompoundTag statusTag = getOrCreateStatusTag(player);
+        statusTag.putBoolean(STAMINA_SPRINT_LOCKED_TAG, locked);
         saveStatusTag(player, statusTag);
     }
 
@@ -321,6 +369,24 @@ public final class DayZPlayerStatusManager {
 
     private static void saveStatusTag(Player player, CompoundTag statusTag) {
         player.getPersistentData().put(ROOT_TAG, statusTag);
+    }
+
+    private static boolean updateSprintRecoveryLock(float stamina, boolean locked) {
+        if (stamina <= getSprintExhaustedThreshold()) {
+            return true;
+        }
+        if (locked && stamina >= getSprintRecoveryThreshold()) {
+            return false;
+        }
+        return locked;
+    }
+
+    private static float getSprintExhaustedThreshold() {
+        return Math.min(SPRINT_EXHAUSTED_STAMINA, getMaxStamina());
+    }
+
+    private static float getSprintRecoveryThreshold() {
+        return Math.min(SPRINT_RECOVERY_STAMINA, getMaxStamina());
     }
 
     private static float clamp(float value, float min, float max) {

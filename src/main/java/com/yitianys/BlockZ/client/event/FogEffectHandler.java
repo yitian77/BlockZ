@@ -36,8 +36,8 @@ public final class FogEffectHandler {
             return;
         }
 
-        float tintStrength = BlockZConfigs.blueFogTintStrength.get().floatValue();
-        float desat = BlockZConfigs.worldDesaturation.get().floatValue();
+        float tintStrength = (float) BlockZConfigs.getBlueFogTintStrength();
+        float desat = (float) BlockZConfigs.getWorldDesaturation();
         if (tintStrength <= 0.0F && desat <= 0.0F) {
             return;
         }
@@ -73,13 +73,12 @@ public final class FogEffectHandler {
             return;
         }
 
-        float density = BlockZConfigs.blueFogDensity.get().floatValue();
-        if (density >= 1.0F) {
-            return;
-        }
+        float density = (float) BlockZConfigs.getBlueFogDensity();
+        density = Math.max(0.2F, Math.min(1.0F, density));
 
-        // 将远平面收紧到原值的 density 倍，营造"雾气更厚"的压抑感
-        float newFar = event.getFarPlaneDistance() * density;
+        float baseStart = event.getNearPlaneDistance();
+        float baseEnd = event.getFarPlaneDistance();
+        float newFar = baseEnd * density;
         // 近平面同步轻微拉近，确保过渡自然
         float newNear = Math.min(event.getNearPlaneDistance(), newFar * 0.25F);
 
@@ -96,7 +95,7 @@ public final class FogEffectHandler {
         if (fluidInCamera != FogType.NONE) {
             return false;
         }
-        if (!BlockZConfigs.enableBlueFog.get()) {
+        if (!BlockZConfigs.getEnableBlueFog()) {
             return false;
         }
         Minecraft mc = Minecraft.getInstance();

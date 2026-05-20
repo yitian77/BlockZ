@@ -1,6 +1,8 @@
 package com.yitianys.BlockZ.entity;
 
+import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
+import com.yitianys.BlockZ.init.ModEntities;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -56,7 +58,7 @@ public class CorpseEntity extends LivingEntity implements Container, MenuProvide
         this.entityData.set(OWNER_NAME, player.getName().getString());
         this.entityData.set(ROTATION, player.getYRot());
         
-        this.despawnTimer = BlockZConfigs.corpseDespawnTime.get() * 20; // Seconds to ticks
+        this.despawnTimer = BlockZConfigs.getCorpseDespawnTime() * 20; // Seconds to ticks
         
         this.setHealth(20.0f);
     }
@@ -116,10 +118,11 @@ public class CorpseEntity extends LivingEntity implements Container, MenuProvide
     public InteractionResult interact(Player player, InteractionHand hand) {
         if (this.isAlive() && !this.level().isClientSide && hand == InteractionHand.MAIN_HAND) {
             NetworkHooks.openScreen((ServerPlayer) player, this, buf -> {
-                buf.writeInt(BlockZConfigs.initialPocketSlots.get()); // Pocket Count for DayZInventoryMenu.fromNetwork
+                buf.writeInt(BlockZConfigs.getInitialPocketSlots()); // Pocket Count for DayZInventoryMenu.fromNetwork
                 buf.writeBoolean(false); // hasPos = false
                 buf.writeByte(1); // Type 1: Entity
                 buf.writeInt(this.getId()); // Entity ID
+                CuriosIntegration.writeAdditionalDayZSlotRefs(player, buf);
             });
             return InteractionResult.CONSUME;
         }

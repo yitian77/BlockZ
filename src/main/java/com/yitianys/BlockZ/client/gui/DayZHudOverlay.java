@@ -4,8 +4,10 @@ import com.yitianys.BlockZ.client.ClientSettings;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.init.ModEffects;
 import com.yitianys.BlockZ.init.ModItems;
+import com.yitianys.BlockZ.util.ProneManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.CameraType;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.world.entity.player.Player;
@@ -75,7 +77,7 @@ public class DayZHudOverlay {
     }
 
     public static final IGuiOverlay HUD_OVERLAY = (gui, guiGraphics, partialTick, width, height) -> {
-        if (!ClientSettings.dayzEnabled || !BlockZConfigs.showDayzHud.get()) {
+        if (!BlockZConfigs.getShowDayzHud() || !ClientSettings.dayzHudEnabled) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
@@ -83,6 +85,8 @@ public class DayZHudOverlay {
             return;
         }
         var player = mc.player;
+        CameraType cameraType = mc.options.getCameraType();
+        boolean showThirdPersonDot = cameraType == CameraType.THIRD_PERSON_BACK;
         // 如果打开了非聊天界面，则不渲染 HUD (防止重叠)
         if (!(mc.screen == null || mc.screen instanceof ChatScreen)) {
             return;
@@ -145,10 +149,11 @@ public class DayZHudOverlay {
         int leftHudY = hotbarY + 6;
         int rightHudY = hotbarY + 3;
 
-        boolean nursingEnabled = BlockZConfigs.enableNursingSystem.get();
+        boolean nursingEnabled = BlockZConfigs.isNursingEnabled();
         boolean wounded = nursingEnabled && player.hasEffect(ModEffects.BLEEDING.get());
         boolean fractured = nursingEnabled && player.hasEffect(ModEffects.FRACTURE.get());
         boolean medicated = nursingEnabled && player.hasEffect(ModEffects.ANALGESIC.get());
+        boolean healthSystemEnabled = BlockZConfigs.isHealthSystemEnabled();
         float staminaRatio = ClientSettings.staminaRatio;
         float infectionRatio = ClientSettings.infectionRatio;
         boolean showInfection = infectionRatio > 0.01F;
@@ -177,9 +182,11 @@ public class DayZHudOverlay {
         int leftStaminaX = Math.max(4, startX - staminaWidth - 48);
         int staminaIconHeight = staminaHeight;
         int staminaIconWidth = Math.max(1, Math.round(staminaIconHeight * (STAMINA_ICON_W / (float) STAMINA_ICON_H)));
-        ResourceLocation staminaIconTexture = player.isCrouching() ? UITextures.HUD_SQUAT : UITextures.HUD_STAMINA_ICON;
+        ResourceLocation staminaIconTexture = ProneManager.isProne(player)
+                ? UITextures.HUD_STANCE_PRONE
+                : (player.isCrouching() ? UITextures.HUD_SQUAT : UITextures.HUD_STAMINA_ICON);
         drawSimpleIcon(guiGraphics, leftStaminaX, leftHudY, staminaIconTexture, staminaIconWidth, 1.0F, STAMINA_ICON_TEX_WIDTH);
-        if (BlockZConfigs.enableStaminaSystem.get()) {
+        if (BlockZConfigs.isStaminaEnabled()) {
             drawHorizontalBar(
                     guiGraphics,
                     leftStaminaX,
@@ -216,46 +223,48 @@ public class DayZHudOverlay {
         int rightPadding = 3;
         int currentRightX = width - rightPadding;
 
-        int healthX = currentRightX - iconSize;
-        drawTieredIcon(
-                guiGraphics,
-                healthX,
-                rightHudY,
-                healthRatioValue,
-                UITextures.HUD_HEALTH_OUTLINE,
-                UITextures.HUD_HEALTH_OUTLINE_DECREASED,
-                UITextures.HUD_HEALTH_OUTLINE_CRITICAL,
-                UITextures.HUD_HEALTH_VALUE,
-                UITextures.HUD_HEALTH_VALUE_DECREASED,
-                UITextures.HUD_HEALTH_VALUE_CRITICAL,
-                iconSize
-        );
-        drawTrendIcon(guiGraphics, healthX, rightHudY, iconSize, healthTrendDir, healthTrendLevel, healthTrendExpire, gameTime);
-        currentRightX = healthX - metricSpacing;
+        if (healthSystemEnabled) {
+            int healthX = currentRightX - iconSize;
+            drawTieredIcon(
+                    guiGraphics,
+                    healthX,
+                    rightHudY,
+                    healthRatioValue,
+                    UITextures.HUD_HEALTH_OUTLINE,
+                    UITextures.HUD_HEALTH_OUTLINE_DECREASED,
+                    UITextures.HUD_HEALTH_OUTLINE_CRITICAL,
+                    UITextures.HUD_HEALTH_VALUE,
+                    UITextures.HUD_HEALTH_VALUE_DECREASED,
+                    UITextures.HUD_HEALTH_VALUE_CRITICAL,
+                    iconSize
+            );
+            drawTrendIcon(guiGraphics, healthX, rightHudY, iconSize, healthTrendDir, healthTrendLevel, healthTrendExpire, gameTime);
+            currentRightX = healthX - metricSpacing;
 
-        int healthPointsX = currentRightX - iconSize;
-        drawTieredIcon(
-                guiGraphics,
-                healthPointsX,
-                rightHudY,
-                healthPointsRatioValue,
-                UITextures.HUD_HEALTH_POINTS_OUTLINE,
-                UITextures.HUD_HEALTH_POINTS_OUTLINE_DECREASED,
-                UITextures.HUD_HEALTH_POINTS_OUTLINE_CRITICAL,
-                UITextures.HUD_HEALTH_POINTS_VALUE,
-                UITextures.HUD_HEALTH_POINTS_VALUE_DECREASED,
-                UITextures.HUD_HEALTH_POINTS_VALUE_CRITICAL,
-                iconSize
-        );
-        drawTrendIcon(guiGraphics, healthPointsX, rightHudY, iconSize, healthPointsTrendDir, healthPointsTrendLevel, healthPointsTrendExpire, gameTime);
-        currentRightX = healthPointsX - metricSpacing;
+            int healthPointsX = currentRightX - iconSize;
+            drawTieredIcon(
+                    guiGraphics,
+                    healthPointsX,
+                    rightHudY,
+                    healthPointsRatioValue,
+                    UITextures.HUD_HEALTH_POINTS_OUTLINE,
+                    UITextures.HUD_HEALTH_POINTS_OUTLINE_DECREASED,
+                    UITextures.HUD_HEALTH_POINTS_OUTLINE_CRITICAL,
+                    UITextures.HUD_HEALTH_POINTS_VALUE,
+                    UITextures.HUD_HEALTH_POINTS_VALUE_DECREASED,
+                    UITextures.HUD_HEALTH_POINTS_VALUE_CRITICAL,
+                    iconSize
+            );
+            drawTrendIcon(guiGraphics, healthPointsX, rightHudY, iconSize, healthPointsTrendDir, healthPointsTrendLevel, healthPointsTrendExpire, gameTime);
+            currentRightX = healthPointsX - metricSpacing;
+        }
 
         int armorX = currentRightX - legacyIconSize;
         drawVerticalFillIcon(guiGraphics, armorX, rightHudY, UITextures.HUD_ARMOR_OUTLINE, UITextures.HUD_ARMOR_VALUE, armorRatio, legacyIconSize, 256);
         currentRightX = armorX - legacySpacing;
 
         int hungerX = currentRightX - legacyIconSize;
-        drawTieredIcon(
+        drawTieredHungerIcon(
                 guiGraphics,
                 hungerX,
                 rightHudY,
@@ -367,6 +376,10 @@ public class DayZHudOverlay {
             guiGraphics.drawString(mc.font, itemName, centerX - nameWidth / 2, height - 40, 0xFFFFFFFF, true);
         }
 
+        if (showThirdPersonDot) {
+            drawThirdPersonCrosshairDot(guiGraphics, width / 2, height / 2);
+        }
+
         RenderSystem.disableBlend();
     };
 
@@ -374,6 +387,13 @@ public class DayZHudOverlay {
                                        ResourceLocation outlineNormal, ResourceLocation outlineDecreased, ResourceLocation outlineCritical,
                                        ResourceLocation valueNormal, ResourceLocation valueDecreased, ResourceLocation valueCritical,
                                        int size) {
+        drawTieredIcon(graphics, x, y, ratio, outlineNormal, outlineDecreased, outlineCritical, valueNormal, valueDecreased, valueCritical, size, 1.0F);
+    }
+
+    private static void drawTieredHungerIcon(GuiGraphics graphics, int x, int y, float ratio,
+                                             ResourceLocation outlineNormal, ResourceLocation outlineDecreased, ResourceLocation outlineCritical,
+                                             ResourceLocation valueNormal, ResourceLocation valueDecreased, ResourceLocation valueCritical,
+                                             int size) {
         ResourceLocation outline = outlineNormal;
         ResourceLocation value = valueNormal;
         if (ratio <= 0.25F) {
@@ -383,7 +403,23 @@ public class DayZHudOverlay {
             outline = outlineDecreased;
             value = valueDecreased;
         }
-        drawVerticalFillIcon(graphics, x, y, outline, value, ratio, size, 300);
+        drawHungerFillIcon(graphics, x, y, outline, value, ratio, size, 300);
+    }
+
+    private static void drawTieredIcon(GuiGraphics graphics, int x, int y, float ratio,
+                                       ResourceLocation outlineNormal, ResourceLocation outlineDecreased, ResourceLocation outlineCritical,
+                                       ResourceLocation valueNormal, ResourceLocation valueDecreased, ResourceLocation valueCritical,
+                                       int size, float fillMultiplier) {
+        ResourceLocation outline = outlineNormal;
+        ResourceLocation value = valueNormal;
+        if (ratio <= 0.25F) {
+            outline = outlineCritical;
+            value = valueCritical;
+        } else if (ratio <= 0.55F) {
+            outline = outlineDecreased;
+            value = valueDecreased;
+        }
+        drawVerticalFillIcon(graphics, x, y, outline, value, ratio, size, 300, fillMultiplier);
     }
 
     private static void updateTrends(long gameTime, float foodRatio, float thirstRatio, float healthRatio, float healthPointsRatio) {
@@ -470,14 +506,19 @@ public class DayZHudOverlay {
     }
 
     private static void drawVerticalFillIcon(GuiGraphics graphics, int x, int y, ResourceLocation outline, ResourceLocation value, float ratio, int size, int texSize) {
+        drawVerticalFillIcon(graphics, x, y, outline, value, ratio, size, texSize, 1.0F);
+    }
+
+    private static void drawVerticalFillIcon(GuiGraphics graphics, int x, int y, ResourceLocation outline, ResourceLocation value, float ratio, int size, int texSize, float fillMultiplier) {
         float clampedRatio = Math.max(0.0F, Math.min(1.0F, ratio));
         if (clampedRatio > 0.0F) {
             Minecraft mc = Minecraft.getInstance();
             int screenHeight = mc.getWindow().getGuiScaledHeight();
             double scale = mc.getWindow().getGuiScale();
             
-            // 使用精确的浮点数比例裁剪，即使不到1像素也能按比例切除
-            double rawHeight = size * clampedRatio;
+            // 对图标使用非线性裁剪，避免线性双倍裁剪在半格时直接见底
+            float adjustedRatio = (float) Math.pow(clampedRatio, Math.max(0.0F, fillMultiplier));
+            double rawHeight = size * Math.max(0.0F, Math.min(1.0F, adjustedRatio));
             
             int scissorX = (int) (x * scale);
             int scissorY = (int) ((screenHeight - y - size) * scale);
@@ -487,6 +528,35 @@ public class DayZHudOverlay {
             RenderSystem.enableScissor(scissorX, scissorY, scissorW, scissorH);
             graphics.blit(value, x, y, size, size, 0, 0, texSize, texSize, texSize, texSize);
             RenderSystem.disableScissor();
+        }
+        graphics.blit(outline, x, y, size, size, 0, 0, texSize, texSize, texSize, texSize);
+    }
+
+    private static void drawHungerFillIcon(GuiGraphics graphics, int x, int y, ResourceLocation outline, ResourceLocation value, float ratio, int size, int texSize) {
+        float clampedRatio = Math.max(0.0F, Math.min(1.0F, ratio));
+        if (clampedRatio > 0.0F) {
+            float visualRatio = (float) Math.pow(clampedRatio, 1.5D);
+
+            Minecraft mc = Minecraft.getInstance();
+            int screenHeight = mc.getWindow().getGuiScaledHeight();
+            double scale = mc.getWindow().getGuiScale();
+
+            int contentTop = Math.round(size * 0.12F);
+            int contentBottom = Math.round(size * 0.98F);
+            int contentHeight = Math.max(1, contentBottom - contentTop);
+            int visibleHeight = Math.max(0, Math.round(contentHeight * visualRatio));
+            int fillTop = y + contentBottom - visibleHeight;
+
+            int scissorX = (int) (x * scale);
+            int scissorY = (int) ((screenHeight - (fillTop + visibleHeight)) * scale);
+            int scissorW = (int) Math.ceil(size * scale);
+            int scissorH = (int) Math.ceil(visibleHeight * scale);
+
+            if (scissorW > 0 && scissorH > 0) {
+                RenderSystem.enableScissor(scissorX, scissorY, scissorW, scissorH);
+                graphics.blit(value, x, y, size, size, 0, 0, texSize, texSize, texSize, texSize);
+                RenderSystem.disableScissor();
+            }
         }
         graphics.blit(outline, x, y, size, size, 0, 0, texSize, texSize, texSize, texSize);
     }
@@ -556,5 +626,10 @@ public class DayZHudOverlay {
         graphics.fill(x, y, x + width, y + height, backgroundColor);
         graphics.fill(x + 1, y + 1, x + 1 + (int) ((width - 2) * clamped), y + height - 1, fillColor);
         graphics.renderOutline(x, y, width, height, 0x80FFFFFF);
+    }
+
+    private static void drawThirdPersonCrosshairDot(GuiGraphics graphics, int centerX, int centerY) {
+        graphics.fill(centerX - 1, centerY - 1, centerX + 2, centerY + 2, 0x90000000);
+        graphics.fill(centerX, centerY, centerX + 1, centerY + 1, 0xFFFFFFFF);
     }
 }

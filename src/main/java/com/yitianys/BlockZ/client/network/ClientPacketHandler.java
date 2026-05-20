@@ -27,8 +27,9 @@ public class ClientPacketHandler {
 
     public static void handleDayzToggleState(DayzToggleStateS2C msg, Supplier<NetworkEvent.Context> ctxSupplier) {
         ClientSettings.dayzEnabled = msg.isEnabled();
+        ClientSettings.dayzHudEnabled = msg.isEnabled();
         if (Minecraft.getInstance().player != null) {
-            if (BlockZConfigs.showDayzToggleChatHint.get()) {
+            if (BlockZConfigs.getShowDayzToggleChatHint()) {
                 Minecraft.getInstance().player.sendSystemMessage(Component.translatable(
                         msg.isEnabled() ? "msg.blockz.dayz_enabled" : "msg.blockz.dayz_disabled"));
             }

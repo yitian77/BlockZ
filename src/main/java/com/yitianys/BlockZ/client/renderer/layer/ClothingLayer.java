@@ -3,6 +3,7 @@ package com.yitianys.BlockZ.client.renderer.layer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import com.yitianys.BlockZ.BlockZ;
+import com.yitianys.BlockZ.client.renderer.FirstPersonBodyRenderState;
 import com.yitianys.BlockZ.capability.PlayerBackpack;
 import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
 import com.yitianys.BlockZ.item.BackpackItem;
@@ -58,6 +59,8 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
     @Override
     public void render(PoseStack poseStack, MultiBufferSource buffer, int packedLight, AbstractClientPlayer player, float limbSwing, float limbSwingAmount, float partialTick, float ageInTicks, float netHeadYaw, float headPitch) {
         if (player.isInvisible()) return;
+        boolean hideHead = FirstPersonBodyRenderState.shouldHideHead();
+        boolean hideArms = FirstPersonBodyRenderState.shouldHideArms();
 
         PlayerModel<AbstractClientPlayer> parentModel = this.getParentModel();
         OuterLayerState previousState = captureOuterLayerState(parentModel);
@@ -68,7 +71,9 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
             renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.CHEST, ClothingItem.ClothingType.SHIRT);
             renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.LEGS, ClothingItem.ClothingType.PANTS);
             renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.FEET, ClothingItem.ClothingType.SHOES);
-            renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.HEAD, ClothingItem.ClothingType.HAT);
+            if (!hideHead) {
+                renderClothing(poseStack, buffer, packedLight, player, EquipmentSlot.HEAD, ClothingItem.ClothingType.HAT);
+            }
 
             // 2. 渲染 Capability 装备 (背心、手套、面具、背包)
             player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).ifPresent(cap -> {
@@ -82,7 +87,7 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
 
                 // Render Hat or Mask in MASK slot
                 ItemStack maskSlotStack = inventory.getStackInSlot(PlayerBackpack.SLOT_MASK);
-                if (!maskSlotStack.isEmpty()) {
+                if (!hideHead && !maskSlotStack.isEmpty()) {
                     if (maskSlotStack.getItem() instanceof ClothingItem c && c.getType() == ClothingItem.ClothingType.HAT) {
                         render3DClothing(poseStack, buffer, packedLight, player, maskSlotStack, ClothingItem.ClothingType.HAT);
                     } else {
@@ -98,7 +103,7 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
 
                 // Render Gloves (2D Texture)
                 ItemStack gloves = inventory.getStackInSlot(PlayerBackpack.SLOT_GLOVES);
-                if (!gloves.isEmpty()) {
+                if (!hideArms && !gloves.isEmpty()) {
                     render2DClothing(poseStack, buffer, packedLight, player, gloves);
                 }
             });
@@ -168,6 +173,8 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
 
     private void renderClothing(PoseStack poseStack, MultiBufferSource buffer, int packedLight, AbstractClientPlayer player, ItemStack stack) {
         if (!(stack.getItem() instanceof ClothingItem clothing)) return;
+        if (FirstPersonBodyRenderState.shouldHideHead() && (clothing.getType() == ClothingItem.ClothingType.HAT || clothing.getType() == ClothingItem.ClothingType.MASK)) return;
+        if (FirstPersonBodyRenderState.shouldHideArms() && clothing.getType() == ClothingItem.ClothingType.GLOVES) return;
         
         // 只有帽子 (HAT) 和 背心 (VEST) 使用 3D 模型渲染
         // 面部装备 (MASK) 以及其他所有类型强制使用经典的 64x32 材质层渲染
@@ -350,12 +357,16 @@ public class ClothingLayer extends RenderLayer<AbstractClientPlayer, PlayerModel
                 break;
             case SHIRT:
                 modelToUse.body.visible = true;
-                modelToUse.rightArm.visible = true;
-                modelToUse.leftArm.visible = true;
+                if (!FirstPersonBodyRenderState.shouldHideArms()) {
+                    modelToUse.rightArm.visible = true;
+                    modelToUse.leftArm.visible = true;
+                }
                 break;
             case GLOVES:
-                modelToUse.rightArm.visible = true;
-                modelToUse.leftArm.visible = true;
+                if (!FirstPersonBodyRenderState.shouldHideArms()) {
+                    modelToUse.rightArm.visible = true;
+                    modelToUse.leftArm.visible = true;
+                }
                 break;
             case PANTS:
                 modelToUse.body.visible = true;

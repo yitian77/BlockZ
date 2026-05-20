@@ -3,6 +3,7 @@ package com.yitianys.BlockZ.init;
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.entity.CorpseEntity;
 import com.yitianys.BlockZ.entity.DayZZombieEntity;
+import com.yitianys.BlockZ.entity.ZombieCorpseEntity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.SpawnPlacements;
@@ -30,6 +31,12 @@ public class ModEntities {
                     .clientTrackingRange(10)
                     .build("corpse"));
 
+    public static final RegistryObject<EntityType<ZombieCorpseEntity>> DAYZ_ZOMBIE_CORPSE =
+            ENTITIES.register("dayz_zombie_corpse", () -> EntityType.Builder.of((EntityType<ZombieCorpseEntity> t, net.minecraft.world.level.Level l) -> new ZombieCorpseEntity(t, l), MobCategory.MISC)
+                    .sized(0.9F, 0.6F)
+                    .clientTrackingRange(10)
+                    .build("dayz_zombie_corpse"));
+
     public static void register(IEventBus eventBus) {
         ENTITIES.register(eventBus);
     }
@@ -37,6 +44,7 @@ public class ModEntities {
     public static void registerAttributes(EntityAttributeCreationEvent event) {
         event.put(DAYZ_ZOMBIE.get(), DayZZombieEntity.createAttributes().build());
         event.put(CORPSE.get(), CorpseEntity.createAttributes().build());
+        event.put(DAYZ_ZOMBIE_CORPSE.get(), ZombieCorpseEntity.createAttributes().build());
     }
 
     public static void registerSpawnPlacements() {

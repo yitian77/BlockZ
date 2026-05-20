@@ -3,12 +3,16 @@ package com.yitianys.BlockZ.client.event;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.yitianys.BlockZ.BlockZ;
 import com.yitianys.BlockZ.client.ClientSettings;
+import com.yitianys.BlockZ.compat.TaczClientCompat;
+import com.yitianys.BlockZ.compat.TaczProneCompat;
 import com.yitianys.BlockZ.config.BlockZConfigs;
+import com.yitianys.BlockZ.config.DayZZombieConfig;
 import com.yitianys.BlockZ.entity.DayZZombieEntity;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.network.NetworkHandler;
 import com.yitianys.BlockZ.network.OpenDayZMenuC2S;
 import com.yitianys.BlockZ.util.DayZStatsManager;
+import com.yitianys.BlockZ.util.ProneManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -31,10 +35,12 @@ import net.minecraft.world.InteractionResult;
 import com.yitianys.BlockZ.network.LootPickupC2S;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.entity.vehicle.ContainerEntity;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-
 import com.yitianys.BlockZ.network.RequestSwitchToDayZMenuC2S;
 import com.yitianys.BlockZ.util.InventoryUtils;
+import com.yitianys.BlockZ.util.ItemSizeManager;
+import net.minecraft.client.CameraType;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -44,7 +50,8 @@ import java.util.Locale;
 
 @Mod.EventBusSubscriber(modid = BlockZ.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public class ClientEvents {
-    private static final float CLIENT_SPRINT_MIN_STAMINA_RATIO = 0.0F;
+    private static final float CLIENT_SPRINT_EXHAUSTED_STAMINA = 1.0F;
+    private static final float CLIENT_SPRINT_RECOVERY_STAMINA = 8.0F;
     private static final float EXHAUSTED_STAMINA_THRESHOLD = 0.03F;
     private static final float HEAVY_BREATHING_THRESHOLD = 0.10F;
     private static final float EXHAUSTED_RECOVERY_CLEAR_THRESHOLD = 0.25F;
@@ -54,8 +61,11 @@ public class ClientEvents {
     private static float lastStaminaRatio = 1.0f;
     private static int breathingCooldown = 0;
     private static boolean exhaustedRecoveryQueued = false;
+    private static boolean sprintRecoveryLocked = false;
     private static net.minecraft.client.resources.sounds.SoundInstance activeStaminaSound = null;
     private static int activeStaminaSoundType = STAMINA_SOUND_NONE;
+    private static boolean taczAimingCameraOverride = false;
+    private static CameraType taczPreviousCameraType = CameraType.THIRD_PERSON_BACK;
 
     // onRegisterGuiOverlays 移到了 ModBusClientEvents
 
@@ -72,12 +82,24 @@ public class ClientEvents {
         if (event.phase != TickEvent.Phase.START || !(event.player instanceof LocalPlayer player)) {
             return;
         }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        if (BlockZConfigs.isThirdPersonFrontViewDisabled() && minecraft.options.getCameraType() == CameraType.THIRD_PERSON_FRONT) {
+            minecraft.options.setCameraType(CameraType.THIRD_PERSON_BACK);
+        }
+        updateTaczAimingCamera(minecraft, player);
+
+        if (ProneManager.validateClientState(player)) {
+            ProneManager.clearAppliedPronePose(player);
+            TaczProneCompat.setClientCrawling(player, false);
+            NetworkHandler.CHANNEL.sendToServer(new com.yitianys.BlockZ.network.ProneUpdateC2S(false));
+        }
         
         // 更新本地统计数据
         DayZStatsManager.update(player);
 
         // 体力呼吸声逻辑
-        if (ClientSettings.dayzEnabled && BlockZConfigs.enableStaminaSystem.get()) {
+        if (BlockZConfigs.isStaminaEnabled()) {
             float staminaRatio = ClientSettings.staminaRatio;
             Minecraft mc = Minecraft.getInstance();
             if (activeStaminaSound != null && !mc.getSoundManager().isActive(activeStaminaSound)) {
@@ -119,16 +141,24 @@ public class ClientEvents {
         }
 
         if (player.isCreative() || player.isSpectator()) {
+            sprintRecoveryLocked = false;
             return;
         }
-        if (ClientSettings.staminaRatio <= CLIENT_SPRINT_MIN_STAMINA_RATIO) {
+
+        float maxStamina = Math.max(1.0F, (float) BlockZConfigs.getStaminaMaxCapacity());
+        float staminaValue = ClientSettings.staminaRatio * maxStamina;
+        float exhaustedThreshold = Math.min(CLIENT_SPRINT_EXHAUSTED_STAMINA, maxStamina);
+        float recoveryThreshold = Math.min(CLIENT_SPRINT_RECOVERY_STAMINA, maxStamina);
+        if (staminaValue <= exhaustedThreshold) {
+            sprintRecoveryLocked = true;
+        } else if (sprintRecoveryLocked && staminaValue >= recoveryThreshold) {
+            sprintRecoveryLocked = false;
+        }
+
+        if (sprintRecoveryLocked) {
             if (player.isSprinting()) {
                 player.setSprinting(false);
             }
-            if (player.getDeltaMovement().horizontalDistanceSqr() > 1.0E-5D) {
-                player.setDeltaMovement(0.0D, player.getDeltaMovement().y, 0.0D);
-            }
-            Minecraft minecraft = Minecraft.getInstance();
             if (minecraft.options.keySprint.isDown()) {
                 minecraft.options.keySprint.setDown(false);
             }
@@ -142,13 +172,54 @@ public class ClientEvents {
         
         // 进入游戏时彻底停止主菜单音乐
         com.yitianys.BlockZ.client.gui.mainmenu.DayZMainMenuScreen.stopMenuMusic();
+        ProneManager.clearClientStates();
         resetStaminaBreathingState();
     }
 
     @SubscribeEvent
     public static void onClientPlayerLoggedOut(ClientPlayerNetworkEvent.LoggingOut event) {
         DayZStatsManager.save();
+        BlockZConfigs.clearSyncedValues();
+        DayZZombieConfig.clearSyncedValues();
+        ItemSizeManager.clearSyncedClientState();
+        ProneManager.clearClientStates();
         resetStaminaBreathingState();
+        resetTaczAimingCamera(Minecraft.getInstance());
+    }
+
+    private static void updateTaczAimingCamera(Minecraft minecraft, LocalPlayer player) {
+        boolean aiming = isTaczAiming(player);
+        CameraType cameraType = minecraft.options.getCameraType();
+        if (aiming) {
+            if (!taczAimingCameraOverride && cameraType == CameraType.THIRD_PERSON_BACK) {
+                taczPreviousCameraType = cameraType;
+                taczAimingCameraOverride = true;
+                minecraft.options.setCameraType(CameraType.FIRST_PERSON);
+            } else if (taczAimingCameraOverride && cameraType != CameraType.FIRST_PERSON) {
+                minecraft.options.setCameraType(CameraType.FIRST_PERSON);
+            }
+            return;
+        }
+
+        if (taczAimingCameraOverride) {
+            if (cameraType == CameraType.FIRST_PERSON) {
+                minecraft.options.setCameraType(taczPreviousCameraType);
+            }
+            taczAimingCameraOverride = false;
+            taczPreviousCameraType = CameraType.THIRD_PERSON_BACK;
+        }
+    }
+
+    private static void resetTaczAimingCamera(Minecraft minecraft) {
+        if (taczAimingCameraOverride && minecraft != null && minecraft.options.getCameraType() == CameraType.FIRST_PERSON) {
+            minecraft.options.setCameraType(taczPreviousCameraType);
+        }
+        taczAimingCameraOverride = false;
+        taczPreviousCameraType = CameraType.THIRD_PERSON_BACK;
+    }
+
+    private static boolean isTaczAiming(LocalPlayer player) {
+        return TaczClientCompat.isClientAiming(player);
     }
 
     private static void playStaminaBreathing(Minecraft mc, int soundType, float staminaRatio) {
@@ -180,6 +251,7 @@ public class ClientEvents {
         breathingCooldown = 0;
         exhaustedRecoveryQueued = false;
         lastStaminaRatio = 1.0f;
+        sprintRecoveryLocked = false;
         stopActiveStaminaSound(Minecraft.getInstance());
     }
 
@@ -209,7 +281,7 @@ public class ClientEvents {
 
     @SubscribeEvent
     public static void onRenderGuiOverlayPre(RenderGuiOverlayEvent.Pre event) {
-        if (ClientSettings.dayzEnabled && BlockZConfigs.showDayzHud.get()) {
+        if (BlockZConfigs.getShowDayzHud() && ClientSettings.dayzHudEnabled) {
             // 在 DayZ 模式下，我们在隐藏原版 UI 之前先渲染暗角，这样暗角就在 DayZ UI 的底层
             renderWastelandVignette(event);
 
@@ -231,7 +303,7 @@ public class ClientEvents {
     @SubscribeEvent
     public static void onRenderGuiOverlayPost(RenderGuiOverlayEvent.Post event) {
         // 在非 DayZ 模式下，我们在原版 HOTBAR 之后渲染暗角，使其在最顶层
-        if (!ClientSettings.dayzEnabled || !BlockZConfigs.showDayzHud.get()) {
+        if (!BlockZConfigs.getShowDayzHud()) {
             if (event.getOverlay().id().equals(VanillaGuiOverlay.HOTBAR.id())) {
                 renderWastelandVignette(event);
             }
@@ -239,12 +311,12 @@ public class ClientEvents {
     }
 
     private static void renderWastelandVignette(RenderGuiOverlayEvent event) {
-        if (!BlockZConfigs.enableVignette.get()) return;
+        if (!BlockZConfigs.getEnableVignette()) return;
         
         Minecraft mc = Minecraft.getInstance();
         if (mc.options.hideGui) return;
 
-        float strength = BlockZConfigs.vignetteStrength.get().floatValue();
+        float strength = (float) BlockZConfigs.getVignetteStrength();
         if (strength <= 0.0F) return;
 
         GuiGraphics g = event.getGuiGraphics();
@@ -309,52 +381,71 @@ public class ClientEvents {
     }
 
     private static boolean shouldSkipDayZOverride(AbstractContainerScreen<?> screen) {
-        // TaCZ 等带自定义按钮/逻辑的工作台界面不适合转换为 DayZ UI，直接放行原界面
         try {
             if (screen.getMenu() != null) {
                 var key = ForgeRegistries.MENU_TYPES.getKey(screen.getMenu().getType());
-                if (key != null && "tacz".equals(key.getNamespace())) {
+                if (key == null || !"minecraft".equals(key.getNamespace())) {
                     return true;
                 }
                 String menuName = screen.getMenu().getClass().getName().toLowerCase(Locale.ROOT);
-                if (menuName.contains("tacz")) {
+                if (menuName.contains("tacz") || !isSafeVanillaContainerMenu(screen)) {
                     return true;
                 }
             }
         } catch (Exception ignored) {
+            return true;
         }
 
         String screenName = screen.getClass().getName().toLowerCase(Locale.ROOT);
         return screenName.contains("tacz");
     }
 
+    private static boolean isSafeVanillaContainerMenu(AbstractContainerScreen<?> screen) {
+        if (screen.getMenu() instanceof ChestMenu chestMenu) {
+            return !(chestMenu.getContainer() instanceof ContainerEntity);
+        }
+
+        String menuClassName = screen.getMenu().getClass().getName();
+        return "net.minecraft.world.inventory.DispenserMenu".equals(menuClassName)
+                || "net.minecraft.world.inventory.HopperMenu".equals(menuClassName)
+                || "net.minecraft.world.inventory.ShulkerBoxMenu".equals(menuClassName);
+    }
+
     @SubscribeEvent
     public static void onScreenOpening(ScreenEvent.Opening event) {
+        boolean inventoryUiEnabled = BlockZConfigs.isDayzInventoryEnabled() && ClientSettings.dayzEnabled;
         if (event.getScreen() instanceof InventoryScreen) {
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null) return;
             
             // 只有当 DayZ UI 启用时才拦截
-            if (ClientSettings.dayzEnabled) {
-                BlockZ.LOGGER.info("Intercepting InventoryScreen opening, sending OpenDayZMenuC2S to server. dayzEnabled={}", ClientSettings.dayzEnabled);
+            if (inventoryUiEnabled) {
+                BlockZ.LOGGER.info("Intercepting InventoryScreen opening, sending OpenDayZMenuC2S to server. dayzEnabled={}, inventoryUiEnabled={}", ClientSettings.dayzEnabled, inventoryUiEnabled);
                 NetworkHandler.CHANNEL.sendToServer(new OpenDayZMenuC2S());
                 if (!isArclightServer()) {
                     event.setCanceled(true);
                 }
             } else {
-                BlockZ.LOGGER.info("Allowing InventoryScreen opening. dayzEnabled={}", ClientSettings.dayzEnabled);
+                BlockZ.LOGGER.info("Allowing InventoryScreen opening. dayzEnabled={}, inventoryUiEnabled={}", ClientSettings.dayzEnabled, inventoryUiEnabled);
             }
         } else if (event.getScreen() instanceof AbstractContainerScreen<?> containerScreen) {
-            if (ClientSettings.dayzEnabled) {
-                if (shouldSkipDayZOverride(containerScreen)) {
-                    return;
-                }
+            if (inventoryUiEnabled) {
                 if (event.getScreen() instanceof com.yitianys.BlockZ.client.gui.DayZInventoryScreen) return;
                 if (event.getScreen() instanceof com.yitianys.BlockZ.client.gui.DayZChestScreen) return;
 
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player == null) return;
                 if (containerScreen.getMenu() == mc.player.inventoryMenu) return;
+
+                if (isArclightServer() && containerScreen.getMenu() instanceof ChestMenu chestMenu) {
+                    event.setCanceled(true);
+                    mc.setScreen(new com.yitianys.BlockZ.client.gui.DayZChestScreen(chestMenu, mc.player.getInventory(), containerScreen.getTitle()));
+                    return;
+                }
+
+                if (shouldSkipDayZOverride(containerScreen)) {
+                    return;
+                }
 
                 int minX = Integer.MAX_VALUE;
                 int minY = Integer.MAX_VALUE;
@@ -400,11 +491,6 @@ public class ClientEvents {
     
     @SubscribeEvent
     public static void onClientRightClickEmpty(PlayerInteractEvent.RightClickEmpty event) {
-        tryPickup(event);
-    }
-
-    @SubscribeEvent
-    public static void onClientEntityInteract(PlayerInteractEvent.EntityInteract event) {
         tryPickup(event);
     }
 

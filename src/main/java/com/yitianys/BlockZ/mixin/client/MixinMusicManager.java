@@ -32,6 +32,6 @@ public class MixinMusicManager {
 
     private boolean shouldBlockMusic() {
         Minecraft mc = Minecraft.getInstance();
-        return mc.level == null && com.yitianys.BlockZ.config.BlockZConfigs.enableCustomMainMenu.get();
+        return mc.level == null && BlockZConfigs.isCustomMainMenuEnabled();
     }
 }

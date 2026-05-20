@@ -305,7 +305,7 @@ public class InventoryUtils {
      */
     public static boolean addItemToDayZInventory(Inventory inv, ItemStack stack) {
         boolean changed = false;
-        int pocketCount = com.yitianys.BlockZ.config.BlockZConfigs.initialPocketSlots.get();
+        int pocketCount = com.yitianys.BlockZ.config.BlockZConfigs.getInitialPocketSlots();
         int maxSlot = 9 + pocketCount; // 0-8 (Hotbar) + 9-(9+count-1) (Pockets)
 
         // 1. 尝试堆叠到现有物品

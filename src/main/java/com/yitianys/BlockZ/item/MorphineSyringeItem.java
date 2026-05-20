@@ -23,7 +23,7 @@ public class MorphineSyringeItem extends MedicalItem {
     @Override
     public @NotNull InteractionResultHolder<ItemStack> use(@NotNull Level level, @NotNull Player player, @NotNull InteractionHand usedHand) {
         ItemStack stack = player.getItemInHand(usedHand);
-        if (!BlockZConfigs.enableNursingSystem.get()) {
+        if (!BlockZConfigs.isNursingEnabled()) {
             return InteractionResultHolder.fail(stack);
         }
         player.startUsingItem(usedHand);

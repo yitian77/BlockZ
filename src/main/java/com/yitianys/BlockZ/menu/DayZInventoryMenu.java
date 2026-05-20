@@ -7,6 +7,7 @@ import com.yitianys.BlockZ.client.gui.UIConstants;
 import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.entity.CorpseEntity;
+import com.yitianys.BlockZ.entity.ZombieCorpseEntity;
 import com.yitianys.BlockZ.init.ModItems;
 import com.yitianys.BlockZ.init.ModMenus;
 import com.yitianys.BlockZ.item.BackpackItem;
@@ -21,6 +22,7 @@ import com.yitianys.BlockZ.menu.VicinityManager;
 import net.minecraft.advancements.CriteriaTriggers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.RegistryAccess;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
 import net.minecraft.resources.ResourceLocation;
@@ -69,19 +71,30 @@ import net.minecraftforge.fml.util.ObfuscationReflectionHelper;
 import net.minecraftforge.items.IItemHandler;
 import net.minecraftforge.items.ItemStackHandler;
 import net.minecraftforge.items.SlotItemHandler;
+import net.minecraftforge.items.wrapper.InvWrapper;
 import net.minecraftforge.network.PacketDistributor;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-public class DayZInventoryMenu extends AbstractContainerMenu {
+public class DayZInventoryMenu extends AbstractContainerMenu implements StorageRefreshableMenu {
     public static final TagKey<Item> BACKPACKS = ItemTags.create(new ResourceLocation(BlockZ.MODID, "backpacks"));
     public static final int VICINITY_SLOTS = 81;
+    private static final int BASE_EQUIPMENT_SLOTS = 9;
+    private static final int SECTION_HEADER_HEIGHT = 12;
+    private static final int ZOMBIE_CORPSE_LOOT_START = 9;
+    private static final int ZOMBIE_CORPSE_LOOT_COUNT = 12;
+    private static final int ZOMBIE_CORPSE_LOOT_COLS = 3;
+
+    private static boolean isCorpseLikeEntity(Entity entity) {
+        return entity instanceof CorpseEntity || entity instanceof ZombieCorpseEntity;
+    }
 
     public static final class VicinitySlotLayout {
         public final int index;
@@ -95,7 +108,26 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         }
     }
 
+    public static final class AdditionalEquipmentGroupLayout {
+        public final String key;
+        public final String label;
+        public final int startRelativeIndex;
+        public final int slotCount;
+        public final int columns;
+        public int headerY = -1000;
+        public int slotsY = -1000;
+
+        public AdditionalEquipmentGroupLayout(String key, String label, int startRelativeIndex, int slotCount, int columns) {
+            this.key = key;
+            this.label = label;
+            this.startRelativeIndex = startRelativeIndex;
+            this.slotCount = slotCount;
+            this.columns = columns;
+        }
+    }
+
     private static List<VicinitySlotLayout> pendingClientLayout;
+    private static List<CuriosIntegration.CurioSlotRef> pendingClientAdditionalEquipmentSlots;
 
     // Proxy container that delegates to activeContainer or behaves as empty
     private final SimpleContainer vicinityInventory = new SimpleContainer(VICINITY_SLOTS);
@@ -245,6 +277,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             DayZInventoryMenu.this.vicinityInventory.clearContent();
         }
     };
+    private final InvWrapper vicinityItemHandler = new InvWrapper(this.vicinityProxy);
 
     private final List<ItemEntity> nearbyEntities = new ArrayList<>();
     private final Player player;
@@ -313,6 +346,16 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         return layout;
     }
 
+    private static void setPendingClientAdditionalEquipmentSlots(List<CuriosIntegration.CurioSlotRef> slots) {
+        pendingClientAdditionalEquipmentSlots = slots;
+    }
+
+    private static List<CuriosIntegration.CurioSlotRef> consumePendingClientAdditionalEquipmentSlots() {
+        List<CuriosIntegration.CurioSlotRef> slots = pendingClientAdditionalEquipmentSlots;
+        pendingClientAdditionalEquipmentSlots = null;
+        return slots;
+    }
+
     private void setClientVicinityLayout(List<VicinitySlotLayout> layout) {
         this.clientVicinityLayout = layout;
         this.clientLayoutMap = null;
@@ -332,12 +375,13 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         BlockPos pos = null;
         Entity entity = null;
         int virtualContainerSize = -1;
+        byte type = 0;
 
         if (hasPos) {
             pos = buf.readBlockPos();
         } else {
             if (buf.isReadable()) {
-                byte type = buf.readByte();
+                type = buf.readByte();
                 if (type == 1) {
                     int entityId = buf.readInt();
                     entity = inv.player.level().getEntity(entityId);
@@ -346,6 +390,11 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 }
             }
         }
+
+        List<CuriosIntegration.CurioSlotRef> extraEquipmentSlots = buf.isReadable()
+                ? CuriosIntegration.readAdditionalDayZSlotRefs(buf)
+                : List.of();
+        setPendingClientAdditionalEquipmentSlots(extraEquipmentSlots);
 
         DayZInventoryMenu menu;
         if (entity != null) {
@@ -373,6 +422,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     }
 
     // Layout Y positions for Screen rendering
+    public int extraEquipmentY = -1000;
     public int pocketsY = UIConstants.INVENTORY_SLOTS_Y;
     public int backpackY = -1000;
     public int vestY = -1000;
@@ -403,11 +453,26 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     private int lastVestCap = 0;
     private int lastShirtCap = 0;
     private int lastPantsCap = 0;
+    private final List<CuriosIntegration.CurioSlotRef> additionalEquipmentSlotRefs = new ArrayList<>();
+    private final List<AdditionalEquipmentGroupLayout> additionalEquipmentGroupLayouts = new ArrayList<>();
+    private final Map<String, Boolean> additionalEquipmentGroupCollapsed = new HashMap<>();
     private ItemStack storageBackpackOverride;
     private ItemStack storageVestOverride;
+
+    private boolean isPlayerCorpseMode() {
+        return this.activeContainer instanceof CorpseEntity;
+    }
+
+    private boolean isZombieCorpseMode() {
+        return this.activeContainer instanceof ZombieCorpseEntity;
+    }
+
+    private boolean hasCorpseEquipmentLayout() {
+        return isPlayerCorpseMode() || isZombieCorpseMode();
+    }
     
     public boolean isCorpseMode() {
-        return this.activeContainer instanceof CorpseEntity;
+        return isPlayerCorpseMode();
     }
     
     public int getCorpseStorageSlotStart() {
@@ -423,13 +488,25 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         return corpseStorageCapacity;
     }
 
+    public boolean isZombieCorpseLootMenuSlot(int menuSlotIndex) {
+        return isZombieCorpseMode() && menuSlotIndex >= ZOMBIE_CORPSE_LOOT_START && menuSlotIndex < ZOMBIE_CORPSE_LOOT_START + ZOMBIE_CORPSE_LOOT_COUNT;
+    }
+
+    public int getZombieCorpseLootMenuStart() {
+        return ZOMBIE_CORPSE_LOOT_START;
+    }
+
+    public int getZombieCorpseLootMenuEnd() {
+        return ZOMBIE_CORPSE_LOOT_START + ZOMBIE_CORPSE_LOOT_COUNT - 1;
+    }
+
     // Vicinity 布局模式：有容器时使用 9 列宽面板，普通背包界面使用 5 列窄面板
     public boolean isContainerVicinityLayout() {
-        return this.activeContainer != null && !this.isWorkbench && !this.isEnchantingTable && !(this.activeContainer instanceof CorpseEntity);
+        return this.activeContainer != null && !this.isWorkbench && !this.isEnchantingTable && !hasCorpseEquipmentLayout();
     }
 
     public boolean supportsContainerPaging() {
-        return this.activeContainer != null && !this.isWorkbench && !this.isEnchantingTable && !(this.activeContainer instanceof CorpseEntity) && this.activeContainer.getContainerSize() > VICINITY_SLOTS;
+        return this.activeContainer != null && !this.isWorkbench && !this.isEnchantingTable && !hasCorpseEquipmentLayout() && this.activeContainer.getContainerSize() > VICINITY_SLOTS;
     }
 
     public int getContainerPage() {
@@ -460,6 +537,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     public int getVicinityCols() {
         // 如果有特定的容器布局，按容器的列数来
         if (isContainerVicinityLayout()) {
+            if (this.activeContainer instanceof ZombieCorpseEntity) {
+                return 3;
+            }
             return Math.max(UIConstants.INVENTORY_COLS, getContainerVicinityCols());
         }
         
@@ -480,6 +560,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         } else if (this.activeContainer instanceof CorpseEntity) {
             // 尸体界面通常比较宽
             return Math.max(UIConstants.INVENTORY_COLS, 9);
+        } else if (this.activeContainer instanceof ZombieCorpseEntity) {
+            return 3;
         }
 
         return UIConstants.INVENTORY_COLS; // 默认 5 列
@@ -519,6 +601,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
     private int getContainerVicinityCols() {
         if (this.activeContainer == null) return UIConstants.VICINITY_COLS;
+        if (this.activeContainer instanceof ZombieCorpseEntity) return 3;
         int size = this.activeContainer.getContainerSize();
         if (size <= 0) return UIConstants.VICINITY_COLS;
         if (size >= UIConstants.VICINITY_COLS * 2) return UIConstants.VICINITY_COLS;
@@ -590,7 +673,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 .map(PlayerBackpack::isDayzEnabled)
                 .orElse(true);
         // 如果是尸体模式，强制解除锁定，以便玩家使用背包扩展槽位
-        boolean isCorpse = entity instanceof CorpseEntity;
+        boolean isCorpse = isCorpseLikeEntity(entity);
         this.isLockedMode = (!dayzEnabled && !player.hasPermissions(2)) && !isCorpse;
 
         this.containerPos = entity != null ? entity.blockPosition() : null;
@@ -885,12 +968,56 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         final int sectionMaxCols = UIConstants.INVENTORY_MAX_COLS;
         int gap = 24;
 
+        this.extraEquipmentY = -1000;
+
+        if (!this.additionalEquipmentGroupLayouts.isEmpty()) {
+            currentY += SECTION_HEADER_HEIGHT;
+            int extraStartIdx = getAdditionalEquipmentSlotStart();
+            for (int groupIndex = 0; groupIndex < this.additionalEquipmentGroupLayouts.size(); groupIndex++) {
+                AdditionalEquipmentGroupLayout group = this.additionalEquipmentGroupLayouts.get(groupIndex);
+                group.headerY = currentY - SECTION_HEADER_HEIGHT;
+                if (this.extraEquipmentY < -500) {
+                    this.extraEquipmentY = currentY;
+                }
+                if (isAdditionalEquipmentGroupCollapsed(group.key)) {
+                    group.slotsY = -1000;
+                    for (int i = 0; i < group.slotCount; i++) {
+                        int menuIndex = extraStartIdx + group.startRelativeIndex + i;
+                        if (menuIndex >= this.slots.size()) break;
+                        setSlotPos(this.slots.get(menuIndex), -10000, -10000);
+                    }
+                } else {
+                    group.slotsY = currentY;
+                    for (int i = 0; i < group.slotCount; i++) {
+                        int menuIndex = extraStartIdx + group.startRelativeIndex + i;
+                        if (menuIndex >= this.slots.size()) break;
+                        Slot slot = this.slots.get(menuIndex);
+                        int r = i / group.columns;
+                        int c = i % group.columns;
+                        int x = startX + c * UIConstants.SLOT_PITCH;
+                        int y = currentY + r * UIConstants.SLOT_PITCH;
+                        setSlotPos(slot, x, y);
+                    }
+                    int rows = (group.slotCount + group.columns - 1) / group.columns;
+                    currentY += rows * UIConstants.SLOT_PITCH;
+                }
+                if (groupIndex < this.additionalEquipmentGroupLayouts.size() - 1) {
+                    currentY += gap;
+                }
+            }
+            currentY += gap;
+        }
+
         // 2.1 口袋区域（固定在顶部），其高度决定后续“衣服/背包内容区”的起始位置。
         // 否则穿上衣服/背包后，内容格子会从同一个 Y 开始布局，造成与口袋重叠。
         int pocketCount = getPocketCount();
         int pocketRows = (pocketCount + sectionMaxCols - 1) / sectionMaxCols;
         int pocketsHeight = pocketRows * UIConstants.SLOT_PITCH;
-        this.pocketsY = UIConstants.INVENTORY_SLOTS_Y;
+        this.pocketsY = pocketCount > 0 ? currentY : -1000;
+
+        if (pocketCount <= 0) {
+            currentY += SECTION_HEADER_HEIGHT;
+        }
 
         // 口袋槽位需要每 tick 重新设置位置：
         // Screen 滚动时会把不可见槽位移到 -10000 隐藏，如果这里不恢复，口袋会“永久消失”直到重开菜单。
@@ -902,36 +1029,14 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             int r = i / sectionMaxCols;
             int c = i % sectionMaxCols;
             int x = startX + c * UIConstants.SLOT_PITCH;
-            int y = UIConstants.INVENTORY_SLOTS_Y + r * UIConstants.SLOT_PITCH;
+            int y = this.pocketsY + r * UIConstants.SLOT_PITCH;
             setSlotPos(s, x, y);
         }
 
-        // 玩家快捷栏(9格)同样需要每 tick 恢复位置：
-        // 1) 滚动逻辑可能会把不可见槽位移到 -10000
-        // 2) 面板尺寸/位置调整时，这里统一以 HOTBAR 面板为参照进行居中布局
-        int hotbarStartIdx = getHotbarStart();
-        int hotbarCols = 5;
-        int hotbarRows = 2;
-        int hotbarContentW = hotbarCols * UIConstants.SLOT_PITCH;
-        int hotbarContentH = hotbarRows * UIConstants.SLOT_PITCH;
-        int hotbarInnerX = UIConstants.HOTBAR_X + Math.max(0, (UIConstants.HOTBAR_W - hotbarContentW) / 2);
-        int hotbarInnerY = UIConstants.HOTBAR_Y + Math.max(0, (UIConstants.HOTBAR_H - hotbarContentH) / 2);
-        for (int i = 0; i < 9; i++) {
-            int menuIndex = hotbarStartIdx + i;
-            if (menuIndex >= this.slots.size()) break;
-            Slot s = this.slots.get(menuIndex);
-            int r = i / hotbarCols;
-            int c = i % hotbarCols;
-            int x = hotbarInnerX + c * UIConstants.SLOT_PITCH;
-            int y = hotbarInnerY + r * UIConstants.SLOT_PITCH;
-            setSlotPos(s, x, y);
+        currentY += pocketsHeight;
+        if (pocketCount > 0) {
+            currentY += gap;
         }
-
-        currentY += pocketsHeight + gap;
-        
-        // Track Vicinity Height
-        int vicinityMinY = UIConstants.VICINITY_SLOTS_Y;
-        int vicinityMaxY = UIConstants.VICINITY_SLOTS_Y;
 
         // 2. Position Core Inventory Slots
         // Equipment (81-89)
@@ -1040,6 +1145,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         this.totalContentHeight = currentY - UIConstants.INVENTORY_SLOTS_Y;
 
         // 4. Position Vicinity Slots (Indices 0-80)
+        int vicinityMaxY = UIConstants.VICINITY_SLOTS_Y;
         if (this.slots.size() >= 30) {
             int vicBaseX = UIConstants.VICINITY_SLOTS_X + getVicinityOffsetX();
             int visible = 0;
@@ -1050,7 +1156,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             } else if (this.activeContainer instanceof net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity) {
                 visible = 3; // In, Fuel, Out
             } else if (this.activeContainer != null) {
-                if (this.activeContainer instanceof CorpseEntity) {
+                if (hasCorpseEquipmentLayout()) {
                     visible = getCorpseVisibleSlots(this.activeContainer);
                 } else {
                     int remaining = this.activeContainer.getContainerSize() - getContainerPageOffset();
@@ -1070,7 +1176,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             for (int i = 0; i < VICINITY_SLOTS; i++) {
                 Slot s = this.slots.get(i);
                 if (i < visible) {
-                    if (this.activeContainer instanceof CorpseEntity) {
+                    if (hasCorpseEquipmentLayout()) {
                         layoutCorpseVicinitySlot(i, s);
                         if (s.y + 18 > vicinityMaxY) vicinityMaxY = s.y + 18;
                     } else if (this.isWorkbench || this.isEnchantingTable || this.activeContainer instanceof net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity) {
@@ -1224,6 +1330,9 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     }
 
     private int getCorpseVisibleSlots(Container container) {
+        if (container instanceof ZombieCorpseEntity zombieCorpse) {
+            return Math.min(21, zombieCorpse.getContainerSize());
+        }
         if (!(container instanceof CorpseEntity corpse)) return 0;
         
         // 计算尸体容器中最后一个非空槽位的索引
@@ -1241,12 +1350,34 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     }
 
     private void layoutCorpseVicinitySlot(int containerIndex, Slot slot) {
-        int equipmentStartX = UIConstants.VICINITY_SLOTS_X + getVicinityOffsetX() + 4;
+        boolean zombieCorpse = this.activeContainer instanceof ZombieCorpseEntity;
+        int corpseEquipmentCols = zombieCorpse ? 4 : 5;
+        int corpseEquipmentWidth = corpseEquipmentCols * UIConstants.SLOT_PITCH - (UIConstants.SLOT_PITCH - UIConstants.SLOT_SIZE);
+        int centeredStartX = UIConstants.VICINITY_SLOTS_X + getVicinityOffsetX() + Math.max(0, (getVicinityPanelWidth() - corpseEquipmentWidth) / 2);
+        int equipmentStartX = centeredStartX;
         int equipmentStartY = UIConstants.VICINITY_SLOTS_Y + 10;
         int x = -10000, y = -10000;
         int eqCol = -1, eqRow = -1;
 
-        if (containerIndex == 4) { // Head
+        if (zombieCorpse) {
+            if (containerIndex == 4) {
+                eqCol = 0; eqRow = 0;
+            } else if (containerIndex == 7) {
+                eqCol = 1; eqRow = 0;
+            } else if (containerIndex == 2) {
+                eqCol = 2; eqRow = 0;
+            } else if (containerIndex == 3) {
+                eqCol = 3; eqRow = 0;
+            } else if (containerIndex == 1) {
+                eqCol = 0; eqRow = 1;
+            } else if (containerIndex == 0) {
+                eqCol = 1; eqRow = 1;
+            } else if (containerIndex == 8) {
+                eqCol = 2; eqRow = 1;
+            } else if (containerIndex == 5) {
+                eqCol = 3; eqRow = 1;
+            }
+        } else if (containerIndex == 4) { // Head
             eqCol = 0; eqRow = 0;
         } else if (containerIndex == 7) { // Mask
             eqCol = 1; eqRow = 0;
@@ -1269,6 +1400,16 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         if (eqCol >= 0) {
             x = equipmentStartX + eqCol * UIConstants.SLOT_PITCH;
             y = equipmentStartY + eqRow * UIConstants.SLOT_PITCH;
+        } else if (this.activeContainer instanceof ZombieCorpseEntity) {
+            int lootStartX = UIConstants.VICINITY_SLOTS_X + getVicinityOffsetX();
+            int lootStartY = equipmentStartY + UIConstants.SLOT_PITCH * 2 + 18;
+            if (containerIndex >= 9) {
+                int lootIndex = containerIndex - 9;
+                int r = lootIndex / 3;
+                int c = lootIndex % 3;
+                x = lootStartX + c * UIConstants.SLOT_PITCH;
+                y = lootStartY + r * UIConstants.SLOT_PITCH;
+            }
         } else {
             int lootStartX = UIConstants.VICINITY_SLOTS_X + getVicinityOffsetX();
             int hotbarStartY = equipmentStartY + UIConstants.SLOT_PITCH * 2 + 18;
@@ -1289,7 +1430,11 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 y = pocketsStartY + r * UIConstants.SLOT_PITCH;
             }
         }
-        setSlotPos(slot, x, y);
+        if (zombieCorpse && containerIndex >= ZOMBIE_CORPSE_LOOT_START && containerIndex < ZOMBIE_CORPSE_LOOT_START + ZOMBIE_CORPSE_LOOT_COUNT) {
+            setSlotPosWithCols(slot, x, y, ZOMBIE_CORPSE_LOOT_START, ZOMBIE_CORPSE_LOOT_COUNT, ZOMBIE_CORPSE_LOOT_COLS);
+        } else {
+            setSlotPos(slot, x, y);
+        }
     }
 
     private boolean canEquip(ItemStack stack, EquipmentSlot slot) {
@@ -1617,8 +1762,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                  int x = UIConstants.VICINITY_SLOTS_X + c * UIConstants.SLOT_PITCH;
                  int y = UIConstants.VICINITY_SLOTS_Y + r * UIConstants.SLOT_PITCH;
                 
-                 if (isCorpseMode() && i <= 8) {
+                 if (hasCorpseEquipmentLayout() && i <= 8) {
                      this.addSlot(createCorpseEquipmentSlot(i, x, y));
+                 } else if (isZombieCorpseMode() && i >= ZOMBIE_CORPSE_LOOT_START && i < ZOMBIE_CORPSE_LOOT_START + ZOMBIE_CORPSE_LOOT_COUNT) {
+                     this.addSlot(createZombieCorpseLootSlot(i, x, y));
                  } else {
                      this.addSlot(new Slot(this.vicinityProxy, i, x, y));
                  }
@@ -1751,6 +1898,21 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 }
             }
         };
+    }
+
+    private Slot createZombieCorpseLootSlot(int containerIndex, int x, int y) {
+        TetrisSlot slot = new TetrisSlot(
+                this.vicinityItemHandler,
+                containerIndex,
+                x,
+                y,
+                ZOMBIE_CORPSE_LOOT_COLS,
+                () -> ZOMBIE_CORPSE_LOOT_COUNT,
+                stack -> false
+        );
+        slot.setSectionBounds(ZOMBIE_CORPSE_LOOT_START, ZOMBIE_CORPSE_LOOT_COUNT);
+        slot.setSectionGridCols(ZOMBIE_CORPSE_LOOT_COLS);
+        return slot;
     }
 
     private void addEquipmentSlots(Inventory inv) {
@@ -1969,6 +2131,34 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                 syncSlot(PlayerBackpack.SLOT_MASK, this.getItem());
             }
         });
+
+        List<CuriosIntegration.CurioSlotRef> requestedExtraSlots = this.player.level().isClientSide
+                ? consumePendingClientAdditionalEquipmentSlots()
+                : null;
+        List<CuriosIntegration.CurioMenuSlot> extraCurioSlots = new ArrayList<>(CuriosIntegration.resolveAdditionalDayZSlots(this.player, requestedExtraSlots));
+        extraCurioSlots.sort(Comparator
+                .comparing((CuriosIntegration.CurioMenuSlot slot) -> CuriosIntegration.getSlotGroupKey(this.player, slot.ref().identifier()))
+                .thenComparingInt(slot -> CuriosIntegration.getSlotOrder(this.player, slot.ref().identifier()))
+                .thenComparing(slot -> slot.ref().identifier())
+                .thenComparingInt(slot -> slot.ref().slotIndex()));
+        this.additionalEquipmentSlotRefs.clear();
+        for (CuriosIntegration.CurioMenuSlot extraSlot : extraCurioSlots) {
+            this.additionalEquipmentSlotRefs.add(extraSlot.ref());
+            final boolean available = extraSlot.available();
+            final int slotIndex = extraSlot.ref().slotIndex();
+            this.addSlot(new SlotItemHandler(extraSlot.handler(), slotIndex, UIConstants.INVENTORY_SLOTS_X, UIConstants.INVENTORY_SLOTS_Y) {
+                @Override
+                public int getMaxStackSize() {
+                    return 1;
+                }
+
+                @Override
+                public boolean mayPlace(ItemStack stack) {
+                    return available && super.mayPlace(stack);
+                }
+            });
+        }
+        rebuildAdditionalEquipmentGroupLayouts();
     }
 
     private void syncSlot(int slotId, ItemStack stack) {
@@ -2102,36 +2292,529 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
     /**
      * 获取指定索引处的物品锚点索引 (用于 Tetris 物品)
      */
-    private int getAnchorSlot(int handlerIndex) {
-        if (handlerIndex < 0 || handlerIndex >= this.backpackContentHandler.getSlots()) return -1;
-        
-        // 检查当前槽位是否已有物品，如果有，它就是锚点
-        if (!this.backpackContentHandler.getStackInSlot(handlerIndex).isEmpty()) return handlerIndex;
-        
-        // 否则，遍历之前的所有槽位，看是否有大物品覆盖了这里
-        // 注意：不同分区可能有不同列数（cap_width），不能写死 5 列。
-        int cols = getSectionColsForHandlerIndex(handlerIndex);
-        int row = handlerIndex / cols;
-        int col = handlerIndex % cols;
-        
-        int searchBack = UIConstants.INVENTORY_MAX_COLS;
-        for (int r = Math.max(0, row - searchBack); r <= row; r++) {
-            for (int c = Math.max(0, col - searchBack); c <= col; c++) {
-                int checkIdx = r * cols + c;
-                if (checkIdx >= handlerIndex) continue;
-                if (checkIdx < 0 || checkIdx >= this.backpackContentHandler.getSlots()) continue;
-                
-                ItemStack stack = this.backpackContentHandler.getStackInSlot(checkIdx);
-                if (stack.isEmpty()) continue;
-                
+    private int findAnchorSlotInSection(IItemHandler handler, int handlerIndex, int sectionStart, int sectionSize, int cols) {
+        if (handlerIndex < sectionStart || handlerIndex >= sectionStart + sectionSize || sectionSize <= 0 || cols <= 0) {
+            return -1;
+        }
+
+        if (!handler.getStackInSlot(handlerIndex).isEmpty()) {
+            return handlerIndex;
+        }
+
+        int relIndex = handlerIndex - sectionStart;
+        int row = relIndex / cols;
+        int col = relIndex % cols;
+        int rowCount = (sectionSize + cols - 1) / cols;
+        int searchBack = Math.max(cols, UIConstants.INVENTORY_MAX_COLS);
+        for (int r = Math.max(0, row - searchBack); r <= row && r < rowCount; r++) {
+            for (int c = Math.max(0, col - searchBack); c <= col && c < cols; c++) {
+                int checkRel = r * cols + c;
+                if (checkRel >= relIndex || checkRel >= sectionSize) {
+                    continue;
+                }
+                int checkIdx = sectionStart + checkRel;
+                ItemStack stack = handler.getStackInSlot(checkIdx);
+                if (stack.isEmpty()) {
+                    continue;
+                }
+
                 ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
                 if (col >= c && col < c + size.width() && row >= r && row < r + size.height()) {
                     return checkIdx;
                 }
             }
         }
-        
+
         return -1;
+    }
+
+    private int getAnchorSlot(int handlerIndex) {
+        if (handlerIndex < 0 || handlerIndex >= this.backpackContentHandler.getSlots()) return -1;
+        int[] bounds = getSectionBoundsForHandlerIndex(handlerIndex);
+        int sectionStart = bounds[0];
+        int sectionSize = bounds[1];
+        int cols = getSectionColsForHandlerIndex(handlerIndex);
+        return findAnchorSlotInSection(this.backpackContentHandler, handlerIndex, sectionStart, sectionSize, cols);
+    }
+
+    private int getZombieCorpseLootAnchorSlot(int menuSlotIndex) {
+        if (!isZombieCorpseLootMenuSlot(menuSlotIndex)) {
+            return -1;
+        }
+        return findAnchorSlotInSection(this.vicinityItemHandler, menuSlotIndex, ZOMBIE_CORPSE_LOOT_START, ZOMBIE_CORPSE_LOOT_COUNT, ZOMBIE_CORPSE_LOOT_COLS);
+    }
+
+    public int getBackpackAnchorMenuSlotIndex(int menuSlotIndex) {
+        if (menuSlotIndex < getBackpackSlotStart() || menuSlotIndex > getBackpackSlotEnd()) {
+            return -1;
+        }
+        int handlerIndex = menuSlotIndex - getBackpackSlotStart();
+        int anchor = getAnchorSlot(handlerIndex);
+        if (anchor == -1) {
+            return -1;
+        }
+        return getBackpackSlotStart() + anchor;
+    }
+
+    public int getGridAnchorMenuSlotIndex(int menuSlotIndex) {
+        if (menuSlotIndex >= getBackpackSlotStart() && menuSlotIndex <= getBackpackSlotEnd()) {
+            return getBackpackAnchorMenuSlotIndex(menuSlotIndex);
+        }
+        if (isZombieCorpseLootMenuSlot(menuSlotIndex)) {
+            return getZombieCorpseLootAnchorSlot(menuSlotIndex);
+        }
+        return -1;
+    }
+
+    private int getCenteredPreviewAnchorSlotInSection(int handlerIndex, ItemStack stack, int sectionStart, int sectionSize, int cols) {
+        if (stack.isEmpty() || handlerIndex < sectionStart || handlerIndex >= sectionStart + sectionSize || sectionSize <= 0 || cols <= 0) {
+            return -1;
+        }
+        ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
+        int relClicked = handlerIndex - sectionStart;
+        int relAnchor = computeCenteredAnchorIndex(relClicked, cols, sectionSize, Math.max(1, size.width()), Math.max(1, size.height()));
+        if (relAnchor == -1) {
+            return -1;
+        }
+        return sectionStart + relAnchor;
+    }
+
+    public int getCenteredPreviewAnchorMenuSlotIndex(int hoveredSlotIndex, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return -1;
+        }
+        if (hoveredSlotIndex >= getBackpackSlotStart() && hoveredSlotIndex <= getBackpackSlotEnd()) {
+            int handlerIndex = hoveredSlotIndex - getBackpackSlotStart();
+            int anchor = getCenteredPreviewAnchorHandlerIndex(hoveredSlotIndex, stack);
+            return anchor == -1 ? -1 : getBackpackSlotStart() + anchor;
+        }
+        if (isZombieCorpseLootMenuSlot(hoveredSlotIndex)) {
+            return getCenteredPreviewAnchorSlotInSection(hoveredSlotIndex, stack, ZOMBIE_CORPSE_LOOT_START, ZOMBIE_CORPSE_LOOT_COUNT, ZOMBIE_CORPSE_LOOT_COLS);
+        }
+        int corpseStart = getCorpseStorageSlotStart();
+        if (corpseStart >= 0 && hoveredSlotIndex >= corpseStart && hoveredSlotIndex <= getCorpseStorageSlotEnd()) {
+            int anchor = getCenteredPreviewAnchorHandlerIndex(hoveredSlotIndex, stack);
+            return anchor == -1 ? -1 : corpseStart + anchor;
+        }
+        return -1;
+    }
+
+    private int[] getSectionBoundsForHandlerIndex(int handlerIndex) {
+        ItemStack backpackStack = getStorageBackpackStack();
+        ItemStack vestStack = getStorageVestStack();
+        ItemStack shirtStack = this.player.getInventory().getArmor(2);
+        ItemStack pantsStack = this.player.getInventory().getArmor(1);
+
+        int bpCap = getStorageSlotCount(backpackStack);
+        int vestCap = getStorageSlotCount(vestStack);
+        int shirtCap = BlockZConfigs.getBackpackSlots(shirtStack);
+        int pantsCap = BlockZConfigs.getBackpackSlots(pantsStack);
+        int[] safeCaps = clampBackpackCaps(bpCap, vestCap, shirtCap, pantsCap);
+        bpCap = safeCaps[0];
+        vestCap = safeCaps[1];
+        shirtCap = safeCaps[2];
+        pantsCap = safeCaps[3];
+
+        int backpackOffset = 0;
+        int vestOffset = backpackOffset + bpCap;
+        int shirtOffset = vestOffset + vestCap;
+        int pantsOffset = shirtOffset + shirtCap;
+
+        if (handlerIndex >= pantsOffset && handlerIndex < pantsOffset + pantsCap) return new int[]{pantsOffset, pantsCap};
+        if (handlerIndex >= shirtOffset && handlerIndex < shirtOffset + shirtCap) return new int[]{shirtOffset, shirtCap};
+        if (handlerIndex >= vestOffset && handlerIndex < vestOffset + vestCap) return new int[]{vestOffset, vestCap};
+        if (handlerIndex >= backpackOffset && handlerIndex < backpackOffset + bpCap) return new int[]{backpackOffset, bpCap};
+        return new int[]{0, 0};
+    }
+
+    public int[] getGridSectionBoundsForHandlerIndex(int handlerIndex) {
+        return getSectionBoundsForHandlerIndex(handlerIndex);
+    }
+
+    public int computeCenteredAnchorIndex(int relClicked, int cols, int sectionSize, int width, int height) {
+        if (cols <= 0 || sectionSize <= 0) {
+            return -1;
+        }
+
+        int clickedCol = relClicked % cols;
+        int clickedRow = relClicked / cols;
+        int rowCount = (sectionSize + cols - 1) / cols;
+        int idealAnchorCol = clickedCol - (width / 2);
+        int idealAnchorRow = clickedRow - (height / 2);
+        int minAnchorCol = 0;
+        int maxAnchorCol = Math.max(0, cols - width);
+        int minAnchorRow = 0;
+        int maxAnchorRow = Math.max(0, rowCount - height);
+
+        int bestAnchor = -1;
+        int bestDistance = Integer.MAX_VALUE;
+
+        for (int anchorRow = minAnchorRow; anchorRow <= maxAnchorRow; anchorRow++) {
+            for (int anchorCol = minAnchorCol; anchorCol <= maxAnchorCol; anchorCol++) {
+                int relAnchor = anchorRow * cols + anchorCol;
+                if (relAnchor < 0 || relAnchor >= sectionSize) {
+                    continue;
+                }
+
+                int maxCoveredIndex = (anchorRow + height - 1) * cols + (anchorCol + width - 1);
+                if (maxCoveredIndex >= sectionSize) {
+                    continue;
+                }
+
+                int distance = Math.abs(anchorRow - idealAnchorRow) + Math.abs(anchorCol - idealAnchorCol);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestAnchor = relAnchor;
+                }
+            }
+        }
+
+        return bestAnchor;
+    }
+
+    public int getCenteredPreviewAnchorHandlerIndex(int hoveredSlotIndex, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return -1;
+        }
+        int handlerIndex = hoveredSlotIndex - getBackpackSlotStart();
+        if (hoveredSlotIndex >= getCorpseStorageSlotStart() && hoveredSlotIndex <= getCorpseStorageSlotEnd()) {
+            handlerIndex = hoveredSlotIndex - getCorpseStorageSlotStart();
+        }
+
+        int[] bounds = getSectionBoundsForHandlerIndex(handlerIndex);
+        int sectionStart = bounds[0];
+        int sectionSize = bounds[1];
+        if (sectionSize <= 0) {
+            return -1;
+        }
+
+        int cols = getSectionColsForHandlerIndex(handlerIndex);
+        if (cols <= 0) {
+            return -1;
+        }
+
+        ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
+        int relClicked = handlerIndex - sectionStart;
+        int relAnchor = computeCenteredAnchorIndex(relClicked, cols, sectionSize, Math.max(1, size.width()), Math.max(1, size.height()));
+        if (relAnchor == -1) {
+            return -1;
+        }
+        return sectionStart + relAnchor;
+    }
+
+    private boolean tryRelocateCoveredSingleSlotItems(int clickedHandlerIndex, ItemStack carried) {
+        ItemSizeManager.ItemSize incomingSize = ItemSizeManager.getSize(carried);
+        int width = Math.max(1, incomingSize.width());
+        int height = Math.max(1, incomingSize.height());
+        if (width <= 1 && height <= 1) {
+            return false;
+        }
+
+        int[] bounds = getSectionBoundsForHandlerIndex(clickedHandlerIndex);
+        int sectionStart = bounds[0];
+        int sectionSize = bounds[1];
+        if (sectionSize <= 0) {
+            return false;
+        }
+
+        int cols = getSectionColsForHandlerIndex(clickedHandlerIndex);
+        if (cols <= 0) {
+            return false;
+        }
+
+        int relClicked = clickedHandlerIndex - sectionStart;
+        if (relClicked < 0 || relClicked >= sectionSize) {
+            return false;
+        }
+
+        int relAnchor = computeCenteredAnchorIndex(relClicked, cols, sectionSize, width, height);
+        if (relAnchor == -1) {
+            return false;
+        }
+        int anchorCol = relAnchor % cols;
+        int anchorRow = relAnchor / cols;
+
+        List<Integer> anchorsToClear = new ArrayList<>();
+        List<ItemStack> displacedItems = new ArrayList<>();
+        for (int r = 0; r < height; r++) {
+            for (int c = 0; c < width; c++) {
+                int targetRel = (anchorRow + r) * cols + (anchorCol + c);
+                if (targetRel < 0 || targetRel >= sectionSize) {
+                    return false;
+                }
+                int targetHandlerIndex = sectionStart + targetRel;
+                int existingAnchor = getAnchorSlot(targetHandlerIndex);
+                if (existingAnchor == -1) {
+                    continue;
+                }
+                if (anchorsToClear.contains(existingAnchor)) {
+                    continue;
+                }
+                ItemStack existingItem = this.backpackContentHandler.getStackInSlot(existingAnchor);
+                if (existingItem.isEmpty()) {
+                    continue;
+                }
+                ItemSizeManager.ItemSize existingSize = ItemSizeManager.getSize(existingItem);
+                if (Math.max(1, existingSize.width()) > 1 || Math.max(1, existingSize.height()) > 1) {
+                    return false;
+                }
+                anchorsToClear.add(existingAnchor);
+                displacedItems.add(existingItem.copy());
+            }
+        }
+
+        if (anchorsToClear.isEmpty()) {
+            return false;
+        }
+
+        for (int anchor : anchorsToClear) {
+            this.backpackContentHandler.setStackInSlot(anchor, ItemStack.EMPTY);
+        }
+
+        boolean[] reserved = new boolean[sectionSize];
+        for (int r = 0; r < height; r++) {
+            for (int c = 0; c < width; c++) {
+                int targetRel = (anchorRow + r) * cols + (anchorCol + c);
+                if (targetRel >= 0 && targetRel < sectionSize) {
+                    reserved[targetRel] = true;
+                }
+            }
+        }
+
+        List<Integer> relocationTargets = new ArrayList<>();
+        boolean success = true;
+        for (ItemStack displaced : displacedItems) {
+            int freeRel = -1;
+            for (int i = 0; i < sectionSize; i++) {
+                if (reserved[i]) {
+                    continue;
+                }
+                int candidateHandlerIndex = sectionStart + i;
+                if (getAnchorSlot(candidateHandlerIndex) != -1) {
+                    continue;
+                }
+                if (!this.backpackContentHandler.getStackInSlot(candidateHandlerIndex).isEmpty()) {
+                    continue;
+                }
+                Slot candidateSlot = this.getSlot(getBackpackSlotStart() + candidateHandlerIndex);
+                if (!candidateSlot.mayPlace(displaced)) {
+                    continue;
+                }
+                freeRel = i;
+                break;
+            }
+            if (freeRel == -1) {
+                success = false;
+                break;
+            }
+            reserved[freeRel] = true;
+            relocationTargets.add(sectionStart + freeRel);
+        }
+
+        if (!success) {
+            for (int i = 0; i < anchorsToClear.size(); i++) {
+                this.backpackContentHandler.setStackInSlot(anchorsToClear.get(i), displacedItems.get(i));
+            }
+            return false;
+        }
+
+        int targetMenuSlot = getBackpackSlotStart() + sectionStart + relAnchor;
+        Slot targetSlot = this.getSlot(targetMenuSlot);
+        if (!targetSlot.mayPlace(carried)) {
+            for (int i = 0; i < anchorsToClear.size(); i++) {
+                this.backpackContentHandler.setStackInSlot(anchorsToClear.get(i), displacedItems.get(i));
+            }
+            return false;
+        }
+
+        targetSlot.set(carried.copy());
+        this.setCarried(ItemStack.EMPTY);
+        for (int i = 0; i < displacedItems.size(); i++) {
+            this.backpackContentHandler.setStackInSlot(relocationTargets.get(i), displacedItems.get(i));
+        }
+        broadcastChanges();
+        saveBackpackToItem();
+        return true;
+    }
+
+    private boolean tryRelocateCoveredZombieCorpseLootItems(int clickedMenuSlotIndex, ItemStack carried) {
+        ItemSizeManager.ItemSize incomingSize = ItemSizeManager.getSize(carried);
+        int width = Math.max(1, incomingSize.width());
+        int height = Math.max(1, incomingSize.height());
+        if (width <= 1 && height <= 1) {
+            return false;
+        }
+
+        int relClicked = clickedMenuSlotIndex - ZOMBIE_CORPSE_LOOT_START;
+        if (relClicked < 0 || relClicked >= ZOMBIE_CORPSE_LOOT_COUNT) {
+            return false;
+        }
+
+        int relAnchor = computeCenteredAnchorIndex(relClicked, ZOMBIE_CORPSE_LOOT_COLS, ZOMBIE_CORPSE_LOOT_COUNT, width, height);
+        if (relAnchor == -1) {
+            return false;
+        }
+        int anchorCol = relAnchor % ZOMBIE_CORPSE_LOOT_COLS;
+        int anchorRow = relAnchor / ZOMBIE_CORPSE_LOOT_COLS;
+
+        List<Integer> anchorsToClear = new ArrayList<>();
+        List<ItemStack> displacedItems = new ArrayList<>();
+        for (int r = 0; r < height; r++) {
+            for (int c = 0; c < width; c++) {
+                int targetRel = (anchorRow + r) * ZOMBIE_CORPSE_LOOT_COLS + c + anchorCol;
+                if (targetRel < 0 || targetRel >= ZOMBIE_CORPSE_LOOT_COUNT) {
+                    return false;
+                }
+                int targetMenuSlotIndex = ZOMBIE_CORPSE_LOOT_START + targetRel;
+                int existingAnchor = getZombieCorpseLootAnchorSlot(targetMenuSlotIndex);
+                if (existingAnchor == -1 || anchorsToClear.contains(existingAnchor)) {
+                    continue;
+                }
+                ItemStack existingItem = this.vicinityItemHandler.getStackInSlot(existingAnchor);
+                if (existingItem.isEmpty()) {
+                    continue;
+                }
+                ItemSizeManager.ItemSize existingSize = ItemSizeManager.getSize(existingItem);
+                if (Math.max(1, existingSize.width()) > 1 || Math.max(1, existingSize.height()) > 1) {
+                    return false;
+                }
+                anchorsToClear.add(existingAnchor);
+                displacedItems.add(existingItem.copy());
+            }
+        }
+
+        if (anchorsToClear.isEmpty()) {
+            return false;
+        }
+
+        for (int anchor : anchorsToClear) {
+            this.vicinityItemHandler.setStackInSlot(anchor, ItemStack.EMPTY);
+        }
+
+        boolean[] reserved = new boolean[ZOMBIE_CORPSE_LOOT_COUNT];
+        for (int r = 0; r < height; r++) {
+            for (int c = 0; c < width; c++) {
+                int targetRel = (anchorRow + r) * ZOMBIE_CORPSE_LOOT_COLS + c + anchorCol;
+                if (targetRel >= 0 && targetRel < ZOMBIE_CORPSE_LOOT_COUNT) {
+                    reserved[targetRel] = true;
+                }
+            }
+        }
+
+        List<Integer> relocationTargets = new ArrayList<>();
+        boolean success = true;
+        for (ItemStack displaced : displacedItems) {
+            int freeRel = -1;
+            for (int i = 0; i < ZOMBIE_CORPSE_LOOT_COUNT; i++) {
+                if (reserved[i]) {
+                    continue;
+                }
+                int candidateMenuSlotIndex = ZOMBIE_CORPSE_LOOT_START + i;
+                if (getZombieCorpseLootAnchorSlot(candidateMenuSlotIndex) != -1) {
+                    continue;
+                }
+                if (!this.vicinityItemHandler.getStackInSlot(candidateMenuSlotIndex).isEmpty()) {
+                    continue;
+                }
+                Slot candidateSlot = this.getSlot(candidateMenuSlotIndex);
+                if (!candidateSlot.mayPlace(displaced)) {
+                    continue;
+                }
+                freeRel = i;
+                break;
+            }
+            if (freeRel == -1) {
+                success = false;
+                break;
+            }
+            reserved[freeRel] = true;
+            relocationTargets.add(ZOMBIE_CORPSE_LOOT_START + freeRel);
+        }
+
+        if (!success) {
+            for (int i = 0; i < anchorsToClear.size(); i++) {
+                this.vicinityItemHandler.setStackInSlot(anchorsToClear.get(i), displacedItems.get(i));
+            }
+            return false;
+        }
+
+        int targetMenuSlot = ZOMBIE_CORPSE_LOOT_START + relAnchor;
+        Slot targetSlot = this.getSlot(targetMenuSlot);
+        if (!targetSlot.mayPlace(carried)) {
+            for (int i = 0; i < anchorsToClear.size(); i++) {
+                this.vicinityItemHandler.setStackInSlot(anchorsToClear.get(i), displacedItems.get(i));
+            }
+            return false;
+        }
+
+        targetSlot.set(carried.copy());
+        this.setCarried(ItemStack.EMPTY);
+        for (int i = 0; i < displacedItems.size(); i++) {
+            this.vicinityItemHandler.setStackInSlot(relocationTargets.get(i), displacedItems.get(i));
+        }
+        if (this.activeContainer != null) {
+            this.activeContainer.setChanged();
+        }
+        broadcastChanges();
+        return true;
+    }
+
+    private boolean handleZombieCorpseLootGridClick(int slotId, int button, ClickType clickType, Player player) {
+        if (!isZombieCorpseLootMenuSlot(slotId)) {
+            return false;
+        }
+
+        ItemStack carried = this.getCarried();
+        if (this.vicinityItemHandler.getStackInSlot(slotId).isEmpty() && carried.isEmpty()) {
+            int anchor = getZombieCorpseLootAnchorSlot(slotId);
+            if (anchor != -1 && anchor != slotId) {
+                super.clicked(anchor, button, clickType, player);
+                return true;
+            }
+        }
+
+        if (carried.isEmpty()) {
+            return false;
+        }
+
+        ItemSizeManager.ItemSize carriedSize = ItemSizeManager.getSize(carried);
+        if (Math.max(1, carriedSize.width()) > 1 || Math.max(1, carriedSize.height()) > 1) {
+            int centeredSlotId = getCenteredPreviewAnchorMenuSlotIndex(slotId, carried);
+            if (centeredSlotId != -1 && centeredSlotId != slotId && getZombieCorpseLootAnchorSlot(slotId) == -1) {
+                Slot centeredSlot = this.getSlot(centeredSlotId);
+                if (centeredSlot.mayPlace(carried)) {
+                    super.clicked(centeredSlotId, button, clickType, player);
+                    return true;
+                }
+            }
+        }
+
+        int anchor = getZombieCorpseLootAnchorSlot(slotId);
+        if (anchor != -1) {
+            ItemStack existingItem = this.vicinityItemHandler.getStackInSlot(anchor);
+            if (!existingItem.isEmpty() && ItemStack.isSameItemSameTags(carried, existingItem)) {
+                super.clicked(anchor, button, clickType, player);
+                return true;
+            }
+
+            if (!existingItem.isEmpty()) {
+                this.vicinityItemHandler.setStackInSlot(anchor, ItemStack.EMPTY);
+                Slot clickedSlot = this.getSlot(slotId);
+                boolean canFit = clickedSlot.mayPlace(carried);
+                if (canFit) {
+                    clickedSlot.set(carried);
+                    this.setCarried(existingItem);
+                    if (this.activeContainer != null) {
+                        this.activeContainer.setChanged();
+                    }
+                    broadcastChanges();
+                    return true;
+                }
+                this.vicinityItemHandler.setStackInSlot(anchor, existingItem);
+            }
+        }
+
+        return tryRelocateCoveredZombieCorpseLootItems(slotId, carried);
     }
 
     private int getSectionColsForHandlerIndex(int handlerIndex) {
@@ -2167,7 +2850,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
     public int getPocketCount() {
         if (syncedPocketCount != -1) return syncedPocketCount;
-        return BlockZConfigs.initialPocketSlots.get();
+        return BlockZConfigs.getInitialPocketSlots();
     }
 
     public int getBackpackSlotStart() {
@@ -2178,11 +2861,90 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         return getBackpackSlotStart() + getBackpackGridSlots() - 1;
     }
 
+    public int getEquipmentStart() {
+        return VICINITY_SLOTS;
+    }
+
+    public int getEquipmentEnd() {
+        return getEquipmentStart() + getEquipmentSlotCount();
+    }
+
+    public int getEquipmentSlotCount() {
+        return BASE_EQUIPMENT_SLOTS + getAdditionalEquipmentSlotCount();
+    }
+
+    public int getAdditionalEquipmentSlotStart() {
+        return getEquipmentStart() + BASE_EQUIPMENT_SLOTS;
+    }
+
+    public int getAdditionalEquipmentSlotCount() {
+        return this.additionalEquipmentSlotRefs.size();
+    }
+
+    public List<AdditionalEquipmentGroupLayout> getAdditionalEquipmentGroupLayouts() {
+        return this.additionalEquipmentGroupLayouts;
+    }
+
+    public boolean isAdditionalEquipmentGroupCollapsed(String groupKey) {
+        return this.additionalEquipmentGroupCollapsed.getOrDefault(groupKey, false);
+    }
+
+    public void toggleAdditionalEquipmentGroupCollapsed(String groupKey) {
+        if (groupKey == null || groupKey.isBlank()) {
+            return;
+        }
+        this.additionalEquipmentGroupCollapsed.put(groupKey, !isAdditionalEquipmentGroupCollapsed(groupKey));
+        updateSlotPositions();
+    }
+
+    public int getScrollableInventoryStart() {
+        return getAdditionalEquipmentSlotCount() > 0 ? getAdditionalEquipmentSlotStart() : getPocketStart();
+    }
+
+    public String getAdditionalEquipmentSlotId(int menuSlotIndex) {
+        int relativeIndex = menuSlotIndex - getAdditionalEquipmentSlotStart();
+        if (relativeIndex < 0 || relativeIndex >= this.additionalEquipmentSlotRefs.size()) {
+            return null;
+        }
+        return this.additionalEquipmentSlotRefs.get(relativeIndex).identifier();
+    }
+
+    public String getAdditionalEquipmentSlotLabel(int menuSlotIndex) {
+        String identifier = getAdditionalEquipmentSlotId(menuSlotIndex);
+        if (identifier == null || identifier.isBlank()) {
+            return null;
+        }
+        String translationKey = CuriosIntegration.getSlotTranslationKey(identifier);
+        if (translationKey != null) {
+            String translated = Component.translatable(translationKey).getString();
+            if (!translated.equals(translationKey)) {
+                return translated;
+            }
+        }
+        String normalized = identifier.replace('-', ' ').replace('_', ' ').trim();
+        StringBuilder builder = new StringBuilder(normalized.length());
+        boolean upper = true;
+        for (int i = 0; i < normalized.length(); i++) {
+            char c = normalized.charAt(i);
+            if (c == ' ') {
+                builder.append(c);
+                upper = true;
+                continue;
+            }
+            builder.append(upper ? Character.toUpperCase(c) : Character.toLowerCase(c));
+            upper = false;
+        }
+        return builder.toString();
+    }
+
     /**
      * 当前右侧物品栏需要的最大列数（用于 UI 动态扩展宽度）。
      */
     public int getInventoryMaxCols() {
         int max = UIConstants.INVENTORY_COLS;
+        for (AdditionalEquipmentGroupLayout group : this.additionalEquipmentGroupLayouts) {
+            max = Math.max(max, group.columns);
+        }
         
         // 考虑初始口袋格子需要的宽度
         int pocketCount = getPocketCount();
@@ -2196,6 +2958,41 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
         max = Math.max(max, this.pantsSectionCols);
         
         return Math.min(UIConstants.INVENTORY_MAX_COLS, max);
+    }
+
+    private void rebuildAdditionalEquipmentGroupLayouts() {
+        this.additionalEquipmentGroupLayouts.clear();
+        if (this.additionalEquipmentSlotRefs.isEmpty()) {
+            return;
+        }
+        String currentKey = null;
+        String currentLabel = null;
+        int startRelativeIndex = 0;
+        int count = 0;
+        for (int i = 0; i < this.additionalEquipmentSlotRefs.size(); i++) {
+            CuriosIntegration.CurioSlotRef ref = this.additionalEquipmentSlotRefs.get(i);
+            String key = CuriosIntegration.getSlotGroupKey(this.player, ref.identifier());
+            String label = CuriosIntegration.getSlotGroupLabel(key);
+            if (!key.equals(currentKey)) {
+                if (currentKey != null) {
+                    addAdditionalEquipmentGroupLayout(currentKey, currentLabel, startRelativeIndex, count);
+                }
+                currentKey = key;
+                currentLabel = label;
+                startRelativeIndex = i;
+                count = 1;
+            } else {
+                count++;
+            }
+        }
+        if (currentKey != null) {
+            addAdditionalEquipmentGroupLayout(currentKey, currentLabel, startRelativeIndex, count);
+        }
+    }
+
+    private void addAdditionalEquipmentGroupLayout(String key, String label, int startRelativeIndex, int count) {
+        int columns = Math.min(UIConstants.INVENTORY_MAX_COLS, Math.max(UIConstants.INVENTORY_COLS, count));
+        this.additionalEquipmentGroupLayouts.add(new AdditionalEquipmentGroupLayout(key, label, startRelativeIndex, count, columns));
     }
 
     private boolean isGroundVicinityMode() {
@@ -2236,6 +3033,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             if (clickType == ClickType.QUICK_CRAFT) {
                 super.clicked(slotId, button, clickType, player);
                 saveBackpackToItem();
+                return;
+            }
+
+            if (handleZombieCorpseLootGridClick(slotId, button, clickType, player)) {
                 return;
             }
 
@@ -2443,6 +3244,20 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             // Case 2: Cursor Has Item - Try Swap
             // 如果鼠标有物品，且点击的位置有物品（或是被占用的格子），尝试交换
             if (!carried.isEmpty()) {
+                ItemSizeManager.ItemSize carriedSize = ItemSizeManager.getSize(carried);
+                if (Math.max(1, carriedSize.width()) > 1 || Math.max(1, carriedSize.height()) > 1) {
+                    int centeredAnchorHandlerIndex = getCenteredPreviewAnchorHandlerIndex(slotId, carried);
+                    if (centeredAnchorHandlerIndex != -1 && centeredAnchorHandlerIndex != handlerIndex && getAnchorSlot(handlerIndex) == -1) {
+                        int centeredSlotId = getBackpackSlotStart() + centeredAnchorHandlerIndex;
+                        Slot centeredSlot = this.getSlot(centeredSlotId);
+                        if (centeredSlot.mayPlace(carried)) {
+                            super.clicked(centeredSlotId, button, clickType, player);
+                            saveBackpackToItem();
+                            return;
+                        }
+                    }
+                }
+
                 int anchor = getAnchorSlot(handlerIndex);
                 // anchor != -1 意味着该格子被占用 (要么是锚点本身，要么是被覆盖)
                 if (anchor != -1) {
@@ -2484,6 +3299,10 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                             this.backpackContentHandler.setStackInSlot(anchor, existingItem);
                         }
                     }
+                }
+
+                if (tryRelocateCoveredSingleSlotItems(handlerIndex, carried)) {
+                    return;
                 }
             }
         }
@@ -2901,6 +3720,16 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
             }
         });
         this.isLoading = false;
+    }
+
+    @Override
+    public void blockz$refreshStorageAfterExternalChange() {
+        if (this.player == null || this.player.level().isClientSide) {
+            return;
+        }
+        loadBackpackFromItem();
+        updateSlotPositions();
+        broadcastChanges();
     }
 
     private void clearBackpackHandler() {
@@ -3358,7 +4187,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
 
     public int getPocketStart() {
-        return VICINITY_SLOTS + 9;
+        return getEquipmentEnd();
     }
 
     public int getPocketEnd() { // Exclusive
@@ -3429,8 +4258,8 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
 
         // 索引范围:
         // Vicinity: 0-(VICINITY_SLOTS-1)
-        // Equipment: VICINITY_SLOTS-(VICINITY_SLOTS+8)
-        // Inventory: (VICINITY_SLOTS+9)-XX (Pockets + Backpack)
+        // Equipment: getEquipmentStart()-getEquipmentEnd()
+        // Inventory: getPocketStart()-XX (Pockets + Backpack)
         // Hotbar: XX-XX
         // Crafting Result: XX
         // Crafting Input: XX
@@ -3503,7 +4332,7 @@ public class DayZInventoryMenu extends AbstractContainerMenu {
                     }
                 }
             }
-        } else if (index >= VICINITY_SLOTS && index < VICINITY_SLOTS + 9) { // From Equipment
+        } else if (index >= getEquipmentStart() && index < getEquipmentEnd()) { // From Equipment
             if (this.isLockedMode) {
                 // 仅允许移动到口袋 或 快捷栏
                 if (!this.moveItemStackTo(stack, getPocketStart(), getPocketEnd(), false)) {

@@ -34,7 +34,7 @@ public class SyncGridRulesS2C {
 
     public static SyncGridRulesS2C createServerSnapshot() {
         return new SyncGridRulesS2C(
-                BlockZConfigs.enableGridSystem.get(),
+                BlockZConfigs.isGridEnabled(),
                 ItemSizeManager.snapshotSizes(),
                 ItemSizeManager.snapshotNbtRules(),
                 ItemSizeManager.snapshotCustomSlots(),

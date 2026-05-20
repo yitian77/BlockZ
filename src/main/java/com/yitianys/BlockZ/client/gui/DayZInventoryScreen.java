@@ -3,8 +3,10 @@ package com.yitianys.BlockZ.client.gui;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.datafixers.util.Pair;
 import com.yitianys.BlockZ.client.ClientSettings;
+import com.yitianys.BlockZ.compat.CuriosIntegration;
 import com.yitianys.BlockZ.client.key.ModKeyMappings;
 import com.yitianys.BlockZ.entity.CorpseEntity;
+import com.yitianys.BlockZ.entity.ZombieCorpseEntity;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.menu.slot.TetrisSlot;
 import com.yitianys.BlockZ.network.NetworkHandler;
@@ -30,6 +32,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.Nameable;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
@@ -48,6 +51,8 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
    private static final int CUSTOM_GRID_ALPHA = 0x60;
    private static final int CUSTOM_PREVIEW_ALPHA = 0x20;
    private static final int PREVIEW_FAIL_COLOR = 0x80E03C3C;
+   private static final int MULTI_SLOT_HOVER_FILL = 0x66FFFFFF;
+   private static final int MULTI_SLOT_HOVER_OUTLINE = 0xFFF0F0F0;
    private static Field SLOT_X_FIELD;
    private static Field SLOT_Y_FIELD;
 
@@ -103,6 +108,8 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
          CorpseEntity corpse = (CorpseEntity)activeContainer;
          String ownerName = corpse.getOwnerName();
          vicinityTitle = ownerName != null && !ownerName.isBlank() ? ownerName.toUpperCase() : "CORPSE";
+      } else if (activeContainer instanceof ZombieCorpseEntity zombieCorpse) {
+         vicinityTitle = zombieCorpse.getDisplayName().getString();
       } else {
          label52: {
             if (activeContainer instanceof Nameable) {
@@ -204,6 +211,21 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
       }
    }
 
+   private void renderAdditionalEquipmentGroupLabels(GuiGraphics graphics, int x, int scrollPixels, int minY, int maxY) {
+      for (DayZInventoryMenu.AdditionalEquipmentGroupLayout group : ((DayZInventoryMenu)this.menu).getAdditionalEquipmentGroupLayouts()) {
+         if (group.headerY < -500) {
+            continue;
+         }
+         int y = group.headerY - scrollPixels;
+         if (y + 8 <= minY || y >= maxY) {
+            continue;
+         }
+         boolean collapsed = ((DayZInventoryMenu)this.menu).isAdditionalEquipmentGroupCollapsed(group.key);
+         graphics.drawString(this.font, collapsed ? "▶" : "▼", x, y, -5592406, true);
+         graphics.drawString(this.font, group.label, x + 10, y, -5592406, true);
+      }
+   }
+
    private void updateSlotScroll(int slotIndex, int scrollPixels, int guiMinY, int guiMaxY) {
       this.updateSlotScroll(slotIndex, scrollPixels, guiMinY, guiMaxY, false);
    }
@@ -253,6 +275,21 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
                      RenderSystem.disableScissor();
                   }
                   continue;
+               }
+            }
+
+            int anchorMenuSlotIndex = ((DayZInventoryMenu)this.menu).getGridAnchorMenuSlotIndex(i);
+            if (anchorMenuSlotIndex != -1 && anchorMenuSlotIndex != i) {
+               Slot anchorSlot = (Slot)((DayZInventoryMenu)this.menu).slots.get(anchorMenuSlotIndex);
+               if (anchorSlot.hasItem()) {
+                  ItemStack anchorStack = anchorSlot.getItem();
+                  ItemSizeManager.ItemSize anchorSize = ItemSizeManager.getSize(anchorStack);
+                  if (anchorSize.width() > 1 || anchorSize.height() > 1) {
+                     if (isScissored) {
+                        RenderSystem.disableScissor();
+                     }
+                     continue;
+                  }
                }
             }
 
@@ -362,11 +399,12 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
       int guiMaxY = guiMinY + 188;
 
       // 方案B：口袋也参与滚动（滚动到底部时口袋自然不可见）
+      this.renderAdditionalEquipmentGroupLabels(graphics, x, scrollPixels, guiMinY, guiMaxY);
       this.renderSectionLabel(graphics, Component.translatable("screen.blockz.pockets"), x, ((DayZInventoryMenu)this.menu).pocketsY, scrollPixels, guiMinY, guiMaxY);
-      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.backpack"), x, ((DayZInventoryMenu)this.menu).backpackY, scrollPixels, guiMinY, guiMaxY);
-      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.vest"), x, ((DayZInventoryMenu)this.menu).vestY, scrollPixels, guiMinY, guiMaxY);
       this.renderSectionLabel(graphics, Component.translatable("screen.blockz.shirt_pocket"), x, ((DayZInventoryMenu)this.menu).shirtY, scrollPixels, guiMinY, guiMaxY);
       this.renderSectionLabel(graphics, Component.translatable("screen.blockz.pants_pocket"), x, ((DayZInventoryMenu)this.menu).pantsY, scrollPixels, guiMinY, guiMaxY);
+      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.vest"), x, ((DayZInventoryMenu)this.menu).vestY, scrollPixels, guiMinY, guiMaxY);
+      this.renderSectionLabel(graphics, Component.translatable("screen.blockz.backpack"), x, ((DayZInventoryMenu)this.menu).backpackY, scrollPixels, guiMinY, guiMaxY);
       if (maxScroll > 0) {
          int scrollX = 270 + this.getInventoryPanelWidth() - 10;
          int scrollY = 10;
@@ -457,6 +495,9 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
          if (slot.isActive() && !slot.hasItem()) {
             int slotX = this.leftPos + slot.x;
             int slotY = this.topPos + slot.y;
+            if (this.renderCuriosSlotIcon(graphics, slotId, slotX, slotY)) {
+               continue;
+            }
             ResourceLocation icon = this.getSlotIcon(slotId);
             if (icon != null) {
                RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 0.4F);
@@ -468,10 +509,61 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
 
    }
 
+   private boolean renderCuriosSlotIcon(GuiGraphics graphics, int slotId, int slotX, int slotY) {
+      if (this.minecraft.player == null) {
+         return false;
+      }
+      String dynamicSlotId = ((DayZInventoryMenu)this.menu).getAdditionalEquipmentSlotId(slotId);
+      if (dynamicSlotId == null || dynamicSlotId.isBlank()) {
+         return false;
+      }
+      ResourceLocation icon = CuriosIntegration.getSlotIcon(this.minecraft.player, dynamicSlotId);
+      if (icon == null || CuriosIntegration.isGenericSlotIcon(icon)) {
+         return false;
+      }
+      TextureAtlasSprite sprite = (TextureAtlasSprite)this.minecraft.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(icon);
+      RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 0.4F);
+      graphics.blit(slotX, slotY, 0, 16, 16, sprite);
+      RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+      return true;
+   }
+
    private ResourceLocation getSlotIcon(int slotId) {
       int vSlots = 81;
       if (slotId >= 0 && slotId < vSlots) {
-         if (((DayZInventoryMenu)this.menu).getActiveContainer() instanceof CorpseEntity) {
+         if (((DayZInventoryMenu)this.menu).getActiveContainer() instanceof ZombieCorpseEntity) {
+            if (slotId == 4) {
+               return UITextures.SLOT_HEADWEAR;
+            }
+
+            if (slotId == 7) {
+               return UITextures.SLOT_MASK;
+            }
+
+            if (slotId == 2) {
+               return UITextures.SLOT_SHIRT;
+            }
+
+            if (slotId == 1) {
+               return UITextures.SLOT_VEST;
+            }
+
+            if (slotId == 8) {
+               return UITextures.SLOT_GLOVES;
+            }
+
+            if (slotId == 3) {
+               return UITextures.SLOT_PANTS;
+            }
+
+            if (slotId == 5) {
+               return UITextures.SLOT_SHOES;
+            }
+
+            if (slotId == 0) {
+               return UITextures.SLOT_BACKPACK;
+            }
+         } else if (((DayZInventoryMenu)this.menu).getActiveContainer() instanceof CorpseEntity) {
             if (slotId == 4) {
                return UITextures.SLOT_HEADWEAR;
             }
@@ -526,8 +618,36 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
          return UITextures.SLOT_VEST;
       } else if (slotId == vSlots + 7) {
          return UITextures.SLOT_GLOVES;
+      } else if (slotId == vSlots + 8) {
+         return UITextures.SLOT_MASK;
       } else {
-         return slotId == vSlots + 8 ? UITextures.SLOT_MASK : null;
+         String dynamicSlotId = ((DayZInventoryMenu)this.menu).getAdditionalEquipmentSlotId(slotId);
+         if (dynamicSlotId == null) {
+            return null;
+         }
+         String normalized = dynamicSlotId.toLowerCase();
+         if (normalized.contains("mask") || normalized.contains("face") || normalized.contains("mouth") || normalized.contains("respir")) {
+            return UITextures.SLOT_MASK;
+         }
+         if (normalized.contains("glove") || normalized.contains("hand") || normalized.contains("wrist")) {
+            return UITextures.SLOT_GLOVES;
+         }
+         if (normalized.contains("boot") || normalized.contains("shoe") || normalized.contains("feet") || normalized.contains("ankle")) {
+            return UITextures.SLOT_SHOES;
+         }
+         if (normalized.contains("pant") || normalized.contains("leg") || normalized.contains("waist")) {
+            return UITextures.SLOT_PANTS;
+         }
+         if (normalized.contains("vest") || normalized.contains("body") || normalized.contains("chest") || normalized.contains("belt")) {
+            return UITextures.SLOT_VEST;
+         }
+         if (normalized.contains("back") || normalized.contains("pack")) {
+            return UITextures.SLOT_BACKPACK;
+         }
+         if (normalized.contains("offhand") || normalized.contains("shield")) {
+            return UITextures.SLOT_OFFHAND;
+         }
+         return UITextures.SLOT_HEADWEAR;
       }
    }
 
@@ -559,6 +679,14 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
          this.renderFootprintsForRange(graphics, corpseStart, corpseEnd, ((DayZInventoryMenu)this.menu).getVicinityCols(), true);
          graphics.disableScissor();
       }
+      if (((DayZInventoryMenu)this.menu).isZombieCorpseLootMenuSlot(((DayZInventoryMenu)this.menu).getZombieCorpseLootMenuStart())) {
+         int vicScissorX = this.leftPos + 0 + ((DayZInventoryMenu)this.menu).getVicinityOffsetX();
+         int vicScissorY = this.topPos + 10 - 1;
+         int vicW = ((DayZInventoryMenu)this.menu).getVicinityPanelWidth();
+         graphics.enableScissor(vicScissorX, vicScissorY, vicScissorX + vicW, vicScissorY + viewH);
+         this.renderFootprintsForRange(graphics, ((DayZInventoryMenu)this.menu).getZombieCorpseLootMenuStart(), ((DayZInventoryMenu)this.menu).getZombieCorpseLootMenuEnd(), ((DayZInventoryMenu)this.menu).getVicinityCols(), false);
+         graphics.disableScissor();
+      }
 
    }
 
@@ -586,11 +714,18 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
       this.renderBackground(graphics);
       super.render(graphics, mouseX, mouseY, partialTick);
+      this.renderHoveredMultiSlotHighlight(graphics);
       this.renderCarriedItemPreview(graphics, mouseX, mouseY);
-      if (this.hoveredSlot != null && this.hoveredSlot.hasItem() && ((DayZInventoryMenu)this.menu).getCarried().isEmpty()) {
-         ItemStack stack = this.hoveredSlot.getItem();
+      Slot hoveredSlot = this.hoveredSlot;
+      if (hoveredSlot != null && hoveredSlot.hasItem() && ((DayZInventoryMenu)this.menu).getCarried().isEmpty()) {
+         ItemStack stack = hoveredSlot.getItem();
          String name = stack.getHoverName().getString();
          graphics.drawString(this.font, name, mouseX + 12, mouseY - 12, -1, true);
+      } else if (hoveredSlot != null && !hoveredSlot.hasItem() && ((DayZInventoryMenu)this.menu).getCarried().isEmpty()) {
+         String slotLabel = ((DayZInventoryMenu)this.menu).getAdditionalEquipmentSlotLabel(hoveredSlot.index);
+         if (slotLabel != null && !slotLabel.isBlank()) {
+            graphics.drawString(this.font, slotLabel, mouseX + 12, mouseY - 12, -1, true);
+         }
       }
 
       if (((DayZInventoryMenu)this.menu).isEnchantingTable) {
@@ -601,27 +736,72 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
       this.renderTooltip(graphics, mouseX, mouseY);
    }
 
+   private void renderHoveredMultiSlotHighlight(GuiGraphics graphics) {
+      Slot hoveredSlot = this.hoveredSlot;
+      if (hoveredSlot == null) {
+         return;
+      }
+      DayZInventoryMenu menu = (DayZInventoryMenu)this.menu;
+      if (!menu.getCarried().isEmpty()) {
+         return;
+      }
+      int anchorMenuSlotIndex = menu.getGridAnchorMenuSlotIndex(hoveredSlot.index);
+      if (anchorMenuSlotIndex == -1 || anchorMenuSlotIndex >= menu.slots.size()) {
+         return;
+      }
+      Slot anchorSlot = (Slot)menu.slots.get(anchorMenuSlotIndex);
+      if (!anchorSlot.hasItem()) {
+         return;
+      }
+      ItemStack stack = anchorSlot.getItem();
+      ItemSizeManager.ItemSize size = ItemSizeManager.getSize(stack);
+      int width = Math.max(1, size.width());
+      int height = Math.max(1, size.height());
+      if (width <= 1 && height <= 1) {
+         return;
+      }
+
+      int slotX = this.leftPos + anchorSlot.x - 1;
+      int slotY = this.topPos + anchorSlot.y - 1;
+      int pixelW = width * 18;
+      int pixelH = height * 18;
+      graphics.pose().pushPose();
+      graphics.pose().translate(0.0F, 0.0F, 260.0F);
+      graphics.fill(slotX, slotY, slotX + pixelW, slotY + pixelH, MULTI_SLOT_HOVER_FILL);
+      graphics.renderOutline(slotX, slotY, pixelW, pixelH, MULTI_SLOT_HOVER_OUTLINE);
+      graphics.pose().popPose();
+   }
+
    private void renderCarriedItemPreview(GuiGraphics graphics, int mouseX, int mouseY) {
       ItemStack carried = ((DayZInventoryMenu)this.menu).getCarried();
-      if (!carried.isEmpty() && this.hoveredSlot != null) {
+      Slot hoveredSlot = this.hoveredSlot;
+      if (!carried.isEmpty() && hoveredSlot != null) {
+         DayZInventoryMenu menu = (DayZInventoryMenu)this.menu;
          ItemSizeManager.ItemSize size = ItemSizeManager.getSize(carried);
          int w = size.width();
          int h = size.height();
          boolean fits = true;
-         int id = this.hoveredSlot.index;
-         boolean isGridArea = id >= ((DayZInventoryMenu)this.menu).getBackpackSlotStart() && id <= ((DayZInventoryMenu)this.menu).getBackpackSlotEnd() || ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() >= 0 && id >= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotStart() && id <= ((DayZInventoryMenu)this.menu).getCorpseStorageSlotEnd();
+         int id = hoveredSlot.index;
+         boolean isGridArea = id >= menu.getBackpackSlotStart() && id <= menu.getBackpackSlotEnd()
+                 || menu.getCorpseStorageSlotStart() >= 0 && id >= menu.getCorpseStorageSlotStart() && id <= menu.getCorpseStorageSlotEnd()
+                 || menu.isZombieCorpseLootMenuSlot(id);
          int previewW = w;
          int previewH = h;
+         Slot previewSlot = hoveredSlot;
          if (isGridArea) {
-            fits = this.hoveredSlot.mayPlace(carried);
+            int previewMenuSlotIndex = menu.getCenteredPreviewAnchorMenuSlotIndex(id, carried);
+            if (previewMenuSlotIndex >= 0 && previewMenuSlotIndex < menu.slots.size()) {
+               previewSlot = (Slot)menu.slots.get(previewMenuSlotIndex);
+            }
+            fits = previewSlot.mayPlace(carried);
          } else {
             previewW = 1;
             previewH = 1;
-            fits = this.hoveredSlot.mayPlace(carried);
+            fits = hoveredSlot.mayPlace(carried);
          }
 
-         int slotX = this.leftPos + this.hoveredSlot.x - 1;
-         int slotY = this.topPos + this.hoveredSlot.y - 1;
+         int slotX = this.leftPos + previewSlot.x - 1;
+         int slotY = this.topPos + previewSlot.y - 1;
          int pixelW = previewW * 18;
          int pixelH = previewH * 18;
          int color = getPreviewFillColor(carried, fits);
@@ -682,7 +862,7 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
       int guiMinY = 10;
       int guiMaxY = guiMinY + 188;
       // 方案B：口袋 + 扩展区一起滚动
-      int startIdx = ((DayZInventoryMenu)this.menu).getPocketStart();
+      int startIdx = ((DayZInventoryMenu)this.menu).getScrollableInventoryStart();
       int endIdx = ((DayZInventoryMenu)this.menu).getBackpackSlotEnd();
 
       for(int i = startIdx; i <= endIdx; ++i) {
@@ -828,6 +1008,8 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
       this.clickStartedInVicinitySlot = false;
       if (button == 0 && ((DayZInventoryMenu)this.menu).supportsContainerPaging() && this.handleVicinityPageClick(mouseX, mouseY)) {
          return true;
+      } else if (button == 0 && this.handleAdditionalEquipmentGroupClick(mouseX, mouseY)) {
+         return true;
       } else {
          int startY;
          int i;
@@ -886,6 +1068,26 @@ public class DayZInventoryScreen extends AbstractContainerScreen<DayZInventoryMe
 
          return super.mouseClicked(mouseX, mouseY, button);
       }
+   }
+
+   private boolean handleAdditionalEquipmentGroupClick(double mouseX, double mouseY) {
+      int totalContentHeight = ((DayZInventoryMenu)this.menu).totalContentHeight;
+      int maxScroll = totalContentHeight - 188;
+      int scrollPixels = (int)(this.scrollOffs * (float)Math.max(0, maxScroll));
+      int textX = this.leftPos + 274;
+      for (DayZInventoryMenu.AdditionalEquipmentGroupLayout group : ((DayZInventoryMenu)this.menu).getAdditionalEquipmentGroupLayouts()) {
+         if (group.headerY < -500) {
+            continue;
+         }
+         int y = this.topPos + group.headerY - scrollPixels;
+         int labelWidth = 10 + this.font.width(group.label);
+         if (mouseX >= (double)textX && mouseX <= (double)(textX + labelWidth) && mouseY >= (double)y && mouseY <= (double)(y + 10)) {
+            ((DayZInventoryMenu)this.menu).toggleAdditionalEquipmentGroupCollapsed(group.key);
+            this.applyInventoryScroll();
+            return true;
+         }
+      }
+      return false;
    }
 
    public boolean mouseReleased(double mouseX, double mouseY, int button) {

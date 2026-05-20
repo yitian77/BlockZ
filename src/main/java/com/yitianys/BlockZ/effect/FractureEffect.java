@@ -44,7 +44,7 @@ public class FractureEffect extends MobEffect {
             entity.getPersistentData().remove(SUPPRESS_FRACTURE_RECOVERED_MESSAGE_TAG);
             return;
         }
-        if (!BlockZConfigs.enableNursingSystem.get() || !BlockZConfigs.enableBrokenLegs.get()) {
+        if (!BlockZConfigs.isNursingEnabled() || !BlockZConfigs.isBrokenLegsEnabled()) {
             return;
         }
         if (entity instanceof Player player) {

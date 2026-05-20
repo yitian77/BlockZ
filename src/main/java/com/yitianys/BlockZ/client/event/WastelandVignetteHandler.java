@@ -37,7 +37,7 @@ public final class WastelandVignetteHandler {
         if (!event.getOverlay().id().equals(VanillaGuiOverlay.HOTBAR.id())) {
             return;
         }
-        if (!BlockZConfigs.enableVignette.get()) {
+        if (!BlockZConfigs.getEnableVignette()) {
             return;
         }
 
@@ -46,7 +46,7 @@ public final class WastelandVignetteHandler {
             return; // 玩家按 F1 隐藏 HUD 时也隐藏暗角，保留截图干净观感
         }
 
-        float strength = BlockZConfigs.vignetteStrength.get().floatValue();
+        float strength = (float) BlockZConfigs.getVignetteStrength();
         if (strength <= 0.0F) {
             return;
         }

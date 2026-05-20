@@ -32,7 +32,7 @@ public class ItemSizeManager {
     private static final Map<Item, Integer> GRID_COLORS = new ConcurrentHashMap<>();
     private static final java.util.List<NbtRule> NBT_RULES = new java.util.concurrent.CopyOnWriteArrayList<>();
     private static final String ROTATED_TAG = "blockz_rotated";
-    private static volatile Boolean SYNCED_GRID_ENABLED = null;
+    private static volatile Boolean syncedGridEnabled = null;
 
     public record NbtRule(Item item, String nbtKey, String nbtValue, int width, int height) {}
 
@@ -58,10 +58,18 @@ public class ItemSizeManager {
     private static ItemSize getBaseSize(ItemStack stack) {
         // Check NBT rules first
         if (stack.hasTag()) {
+            net.minecraft.nbt.CompoundTag tag = stack.getTag();
+            if (tag == null) {
+                return SIZES.getOrDefault(stack.getItem(), new ItemSize(1, 1));
+            }
             for (NbtRule rule : NBT_RULES) {
                 if (rule.item() == stack.getItem()) {
-                    net.minecraft.nbt.CompoundTag tag = stack.getTag();
-                    if (tag.contains(rule.nbtKey()) && tag.getString(rule.nbtKey()).equals(rule.nbtValue())) {
+                    String nbtKey = rule.nbtKey();
+                    String nbtValue = rule.nbtValue();
+                    if (nbtKey == null || nbtValue == null) {
+                        continue;
+                    }
+                    if (tag.contains(nbtKey) && nbtValue.equals(tag.getString(nbtKey))) {
                          return new ItemSize(rule.width(), rule.height());
                     }
                 }
@@ -84,7 +92,11 @@ public class ItemSizeManager {
     }
 
     private static boolean isRotated(ItemStack stack) {
-        return stack.hasTag() && stack.getTag().getBoolean(ROTATED_TAG);
+        if (!stack.hasTag()) {
+            return false;
+        }
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        return tag != null && tag.getBoolean(ROTATED_TAG);
     }
 
     private static void setRotated(ItemStack stack, boolean rotated) {
@@ -94,8 +106,12 @@ public class ItemSizeManager {
             return;
         }
         if (stack.hasTag()) {
-            stack.getTag().remove(ROTATED_TAG);
-            if (stack.getTag().isEmpty()) {
+            net.minecraft.nbt.CompoundTag tag = stack.getTag();
+            if (tag == null) {
+                return;
+            }
+            tag.remove(ROTATED_TAG);
+            if (tag.isEmpty()) {
                 stack.setTag(null);
             }
         }
@@ -158,9 +174,10 @@ public class ItemSizeManager {
     }
 
     public static boolean isGridEnabled() {
-        boolean cfg = BlockZConfigs.enableGridSystem.get();
-        Boolean synced = SYNCED_GRID_ENABLED;
-        return cfg && (synced == null ? true : synced);
+        if (syncedGridEnabled != null) {
+            return syncedGridEnabled;
+        }
+        return BlockZConfigs.isGridEnabled();
     }
 
     public static Integer getGridColor(ItemStack stack) {
@@ -192,7 +209,9 @@ public class ItemSizeManager {
             if (root.has("items")) {
                 JsonObject items = root.getAsJsonObject("items");
                 for (Map.Entry<String, JsonElement> entry : items.entrySet()) {
-                    ResourceLocation id = ResourceLocation.tryParse(entry.getKey());
+                    String itemIdText = entry.getKey();
+                    if (itemIdText == null || itemIdText.isBlank()) continue;
+                    ResourceLocation id = ResourceLocation.tryParse(itemIdText);
                     if (id == null) continue;
                     Item item = ForgeRegistries.ITEMS.getValue(id);
                     if (item == null || item == Items.AIR) continue;
@@ -225,13 +244,16 @@ public class ItemSizeManager {
                     if (!el.isJsonObject()) continue;
                     JsonObject obj = el.getAsJsonObject();
                     if (obj.has("id") && obj.has("nbt_key") && obj.has("nbt_value") && obj.has("width") && obj.has("height")) {
-                        ResourceLocation id = ResourceLocation.tryParse(obj.get("id").getAsString());
+                        String itemIdText = obj.get("id").getAsString();
+                        if (itemIdText == null || itemIdText.isBlank()) continue;
+                        ResourceLocation id = ResourceLocation.tryParse(itemIdText);
                         if (id == null) continue;
                         Item item = ForgeRegistries.ITEMS.getValue(id);
                         if (item == null || item == Items.AIR) continue;
                         
                         String key = obj.get("nbt_key").getAsString();
                         String value = obj.get("nbt_value").getAsString();
+                        if (key == null || value == null) continue;
                         int w = obj.get("width").getAsInt();
                         int h = obj.get("height").getAsInt();
                         
@@ -498,7 +520,12 @@ public class ItemSizeManager {
     }
 
     public static void setSyncedGridEnabled(boolean enabled) {
-        SYNCED_GRID_ENABLED = enabled;
+        syncedGridEnabled = enabled;
+    }
+
+    public static void clearSyncedClientState() {
+        syncedGridEnabled = null;
+        loadCustomSizes();
     }
 
     public static Map<Item, ItemSize> snapshotSizes() {

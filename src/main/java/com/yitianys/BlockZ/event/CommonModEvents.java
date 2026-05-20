@@ -1,6 +1,10 @@
 package com.yitianys.BlockZ.event;
 
 import com.yitianys.BlockZ.BlockZ;
+import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
+import com.yitianys.BlockZ.compat.CuriosIntegration;
+import com.yitianys.BlockZ.client.ClientSettings;
+import com.yitianys.BlockZ.client.gui.DayZInventoryScreen;
 import com.yitianys.BlockZ.menu.DayZInventoryMenu;
 import com.yitianys.BlockZ.init.ModEffects;
 import com.yitianys.BlockZ.network.NetworkHandler;
@@ -28,12 +32,13 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.common.ForgeMod;
 
 import net.minecraft.world.entity.Entity;
 
 import com.yitianys.BlockZ.util.DayZPlayerStatusManager;
 import com.yitianys.BlockZ.util.InventoryUtils;
-import net.minecraft.world.entity.vehicle.ContainerEntity;
+import com.yitianys.BlockZ.util.ProneManager;
 import net.minecraftforge.items.IItemHandler;
 
 import java.util.Map;
@@ -52,7 +57,6 @@ import net.minecraftforge.network.NetworkHooks;
 import net.minecraftforge.network.PacketDistributor;
 
 import com.yitianys.BlockZ.capability.PlayerBackpack;
-import com.yitianys.BlockZ.capability.PlayerBackpackProvider;
 import com.yitianys.BlockZ.config.BlockZConfigs;
 import com.yitianys.BlockZ.init.ModItems;
 
@@ -84,6 +88,13 @@ public class CommonModEvents {
     private static final float FRACTURE_CREATIVE_SPEED_SCALE = 0.45F;
     private static final float FRACTURE_RECOVERY_CREATIVE_SPEED_SCALE = 0.65F;
     private static final UUID LOW_HEALTH_SPEED_UUID = UUID.fromString("f732a2bb-9b9a-4b72-871d-2fd86a55b68b");
+    private static final UUID PRONE_SPEED_UUID = UUID.fromString("4b9d5147-a6dc-4fa4-9fd1-88655c6d4086");
+    private static final UUID PRONE_STEP_HEIGHT_UUID = UUID.fromString("f8442c31-a7da-455c-8d55-b3d86ab70f0b");
+    private static final double PRONE_SPEED_MULTIPLIER = -0.4D;
+    private static final double PRONE_STEP_HEIGHT_OFFSET = -0.6D;
+    private static final int STATUS_SYNC_INTERVAL_TICKS = 20;
+    private static final int STATUS_SYNC_SCALE = 1000;
+    private static final Map<UUID, StatusSyncSnapshot> LAST_SYNCED_STATUS = new ConcurrentHashMap<>();
 
     // 跳跃体力消耗控制相关
     private static final String JUMP_TIME_TAG = "blockz_last_jump_time";
@@ -93,6 +104,12 @@ public class CommonModEvents {
     @SubscribeEvent
     public static void onPlayerJump(LivingEvent.LivingJumpEvent event) {
         if (event.getEntity() instanceof Player player && !player.level().isClientSide) {
+            if (ProneManager.isServerProne(player)) {
+                net.minecraft.world.phys.Vec3 movement = player.getDeltaMovement();
+                player.setDeltaMovement(movement.x, Math.min(0.0D, movement.y), movement.z);
+                player.hasImpulse = true;
+                return;
+            }
             long currentTime = player.level().getGameTime();
             CompoundTag tag = player.getPersistentData();
             
@@ -127,39 +144,33 @@ public class CommonModEvents {
 
         Player player = event.player;
         if (event.phase == TickEvent.Phase.START) {
+            if (player instanceof ServerPlayer serverPlayer && ProneManager.validateServerState(serverPlayer)) {
+                ProneManager.broadcastState(serverPlayer);
+            }
             if (!DayZPlayerStatusManager.canSprint(player)) {
                 if (player.isSprinting()) {
                     player.setSprinting(false);
-                }
-                net.minecraft.world.phys.Vec3 movement = player.getDeltaMovement();
-                double horizontalSpeedSqr = movement.x * movement.x + movement.z * movement.z;
-                if (horizontalSpeedSqr > 1.0E-5D) {
-                    player.setDeltaMovement(0.0D, movement.y, 0.0D);
-                    player.hurtMarked = true;
                 }
             }
             return;
         }
 
         Inventory inv = player.getInventory();
-        boolean nursingEnabled = BlockZConfigs.enableNursingSystem.get();
+        boolean nursingEnabled = BlockZConfigs.isNursingEnabled();
 
         if (!DayZPlayerStatusManager.canSprint(player)) {
             if (player.isSprinting()) {
                 player.setSprinting(false);
             }
-            net.minecraft.world.phys.Vec3 movement = player.getDeltaMovement();
-            double horizontalSpeedSqr = movement.x * movement.x + movement.z * movement.z;
-            if (horizontalSpeedSqr > 1.0E-5D) {
-                player.setDeltaMovement(0.0D, movement.y, 0.0D);
-                player.hurtMarked = true;
-            }
+        }
+        if (ProneManager.isServerProne(player)) {
+            player.setSprinting(false);
         }
 
         DayZPlayerStatusManager.tick(player);
         applyHealthMovementPenalty(player);
         if (player instanceof ServerPlayer serverPlayer && player.tickCount % 2 == 0) {
-            syncDayZStatus(serverPlayer);
+            syncDayZStatus(serverPlayer, false);
         }
 
         if (player.getAbilities().instabuild) {
@@ -179,7 +190,7 @@ public class CommonModEvents {
             }
         }
 
-        boolean brokenLegsEnabled = nursingEnabled && BlockZConfigs.enableBrokenLegs.get();
+        boolean brokenLegsEnabled = nursingEnabled && BlockZConfigs.isBrokenLegsEnabled();
         if (!nursingEnabled) {
             if (player.hasEffect(ModEffects.BLEEDING.get())) {
                 player.removeEffect(ModEffects.BLEEDING.get());
@@ -195,7 +206,7 @@ public class CommonModEvents {
                 restoreCreativeFractureMovement(serverPlayer);
             }
         } else {
-            if (!BlockZConfigs.enableBleeding.get() && player.hasEffect(ModEffects.BLEEDING.get())) {
+            if (!BlockZConfigs.isBleedingEnabled() && player.hasEffect(ModEffects.BLEEDING.get())) {
                 player.removeEffect(ModEffects.BLEEDING.get());
             }
             if (!brokenLegsEnabled && player.hasEffect(ModEffects.FRACTURE.get())) {
@@ -257,14 +268,14 @@ public class CommonModEvents {
                 .map(PlayerBackpack::isDayzEnabled)
                 .orElse(true);
         boolean isAdmin = player.hasPermissions(2);
-        boolean lockEnabled = BlockZConfigs.enableVanillaBackpackLock.get();
+        boolean lockEnabled = BlockZConfigs.getEnableVanillaBackpackLock();
 
         int allowedSlots = 0;
 
         // 计算允许的槽位数
         if (!dayzEnabled && !isAdmin && lockEnabled) {
             // 基础口袋槽位 (5格, 对应原版 9-13)
-            allowedSlots = BlockZConfigs.initialPocketSlots.get();
+            allowedSlots = BlockZConfigs.getInitialPocketSlots();
 
             // 获取装备提供的槽位 (在 Vanilla UI 模式下禁用)
             // allowedSlots += player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK).map(cap -> {
@@ -329,20 +340,59 @@ public class CommonModEvents {
         if (speed.getModifier(LOW_HEALTH_SPEED_UUID) != null) {
             speed.removeModifier(LOW_HEALTH_SPEED_UUID);
         }
+        if (speed.getModifier(PRONE_SPEED_UUID) != null) {
+            speed.removeModifier(PRONE_SPEED_UUID);
+        }
+    }
+
+    private static void clearProneStepHeightModifier(Player player) {
+        AttributeInstance stepHeight = player.getAttribute(ForgeMod.STEP_HEIGHT_ADDITION.get());
+        if (stepHeight != null && stepHeight.getModifier(PRONE_STEP_HEIGHT_UUID) != null) {
+            stepHeight.removeModifier(PRONE_STEP_HEIGHT_UUID);
+        }
+    }
+
+    private static void applyProneStepHeightModifier(Player player) {
+        AttributeInstance stepHeight = player.getAttribute(ForgeMod.STEP_HEIGHT_ADDITION.get());
+        if (stepHeight == null) {
+            return;
+        }
+        if (stepHeight.getModifier(PRONE_STEP_HEIGHT_UUID) != null) {
+            return;
+        }
+        stepHeight.addTransientModifier(new AttributeModifier(
+                PRONE_STEP_HEIGHT_UUID,
+                "blockz_prone_step_height",
+                PRONE_STEP_HEIGHT_OFFSET,
+                AttributeModifier.Operation.ADDITION
+        ));
     }
 
     private static void applyHealthMovementPenalty(Player player) {
         AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
         if (speed == null) {
+            clearProneStepHeightModifier(player);
             return;
         }
 
         if (player.isSpectator() || player.getAbilities().instabuild) {
             clearHealthSpeedModifier(speed);
+            clearProneStepHeightModifier(player);
             return;
         }
 
         clearHealthSpeedModifier(speed);
+        if (ProneManager.shouldApplyMovementPenalty(player)) {
+            speed.addTransientModifier(new AttributeModifier(
+                    PRONE_SPEED_UUID,
+                    "blockz_prone_speed",
+                    PRONE_SPEED_MULTIPLIER,
+                    AttributeModifier.Operation.MULTIPLY_TOTAL
+            ));
+            applyProneStepHeightModifier(player);
+        } else {
+            clearProneStepHeightModifier(player);
+        }
         double amount = DayZPlayerStatusManager.getMovementPenaltyMultiplier(player);
         if (amount >= 0.0D) {
             return;
@@ -356,22 +406,76 @@ public class CommonModEvents {
         ));
     }
 
+    public static void clearStatusSyncCache(ServerPlayer player) {
+        LAST_SYNCED_STATUS.remove(player.getUUID());
+    }
+
     private static void syncDayZStatus(ServerPlayer player) {
+        syncDayZStatus(player, true);
+    }
+
+    private static void syncDayZStatus(ServerPlayer player, boolean force) {
+        float healthPointsRatio = DayZPlayerStatusManager.getHealthPointsRatio(player);
+        float healthRatio = DayZPlayerStatusManager.getHealthRatio(player);
+        float staminaRatio = DayZPlayerStatusManager.getStaminaRatio(player);
+        float infectionRatio = DayZPlayerStatusManager.getInfectionRatio(player);
+        long gameTime = player.serverLevel().getGameTime();
+        UUID playerId = player.getUUID();
+
+        StatusSyncSnapshot current = new StatusSyncSnapshot(
+                quantizeStatus(healthPointsRatio),
+                quantizeStatus(healthRatio),
+                quantizeStatus(staminaRatio),
+                quantizeStatus(infectionRatio),
+                gameTime
+        );
+        StatusSyncSnapshot last = LAST_SYNCED_STATUS.get(playerId);
+        boolean changed = last == null
+                || last.healthPointsRatio != current.healthPointsRatio
+                || last.healthRatio != current.healthRatio
+                || last.staminaRatio != current.staminaRatio
+                || last.infectionRatio != current.infectionRatio;
+        boolean intervalElapsed = last == null || gameTime - last.gameTime >= STATUS_SYNC_INTERVAL_TICKS;
+        if (!force && !changed && !intervalElapsed) {
+            return;
+        }
+
+        LAST_SYNCED_STATUS.put(playerId, current);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SyncPlayerStatusS2C(
-                DayZPlayerStatusManager.getHealthPointsRatio(player),
-                DayZPlayerStatusManager.getHealthRatio(player),
-                DayZPlayerStatusManager.getStaminaRatio(player),
-                DayZPlayerStatusManager.getInfectionRatio(player)
+                healthPointsRatio,
+                healthRatio,
+                staminaRatio,
+                infectionRatio
         ));
+    }
+
+    private static int quantizeStatus(float value) {
+        return Math.max(0, Math.min(STATUS_SYNC_SCALE, Math.round(value * STATUS_SYNC_SCALE)));
+    }
+
+    private static final class StatusSyncSnapshot {
+        private final int healthPointsRatio;
+        private final int healthRatio;
+        private final int staminaRatio;
+        private final int infectionRatio;
+        private final long gameTime;
+
+        private StatusSyncSnapshot(int healthPointsRatio, int healthRatio, int staminaRatio, int infectionRatio, long gameTime) {
+            this.healthPointsRatio = healthPointsRatio;
+            this.healthRatio = healthRatio;
+            this.staminaRatio = staminaRatio;
+            this.infectionRatio = infectionRatio;
+            this.gameTime = gameTime;
+        }
     }
 
     @SubscribeEvent(priority = EventPriority.HIGH)
     public static void onLivingFall(LivingFallEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (player.isSpectator()) return;
-        if (!BlockZConfigs.enableNursingSystem.get()) return;
+        if (!BlockZConfigs.isNursingEnabled()) return;
 
-        if (!BlockZConfigs.enableBrokenLegs.get()) return;
+        if (!BlockZConfigs.isBrokenLegsEnabled()) return;
 
         float distance = event.getDistance();
         if (distance <= 0.0F) return;
@@ -383,8 +487,8 @@ public class CommonModEvents {
             return;
         }
 
-        float baseChance = (float) (BlockZConfigs.brokenLegChanceMultiplier.get() * player.fallDistance / player.getMaxFallDistance());
-        float maxChance = BlockZConfigs.brokenLegMaxChance.get().floatValue();
+        float baseChance = (float) (BlockZConfigs.getBrokenLegChanceMultiplier() * player.fallDistance / player.getMaxFallDistance());
+        float maxChance = (float) BlockZConfigs.getBrokenLegMaxChance();
         float legBreakChance = Math.min(maxChance, Math.max(0.0F, baseChance));
         if (player.getRandom().nextFloat() < legBreakChance) {
             if (recovering) {
@@ -406,15 +510,15 @@ public class CommonModEvents {
         DayZPlayerStatusManager.applyDamage(player, event.getAmount());
         syncDayZStatus(player);
 
-        if (!BlockZConfigs.enableNursingSystem.get()) return;
+        if (!BlockZConfigs.isNursingEnabled()) return;
 
-        if (!BlockZConfigs.enableBleeding.get()) return;
+        if (!BlockZConfigs.isBleedingEnabled()) return;
 
         DamageSource source = event.getSource();
         Entity directEntity = source.getDirectEntity();
         Entity attacker = source.getEntity();
 
-        float chance = (float) (BlockZConfigs.baseBleedingChance.get() * event.getAmount());
+        float chance = (float) (BlockZConfigs.getBaseBleedingChance() * event.getAmount());
         if (attacker instanceof Zombie || directEntity instanceof Zombie) {
             chance = Math.max(chance, ZOMBIE_BLEEDING_BASE_CHANCE * event.getAmount());
         }
@@ -540,9 +644,10 @@ public class CommonModEvents {
                         return new DayZInventoryMenu(id, inventory, pos);
                     }
                 }, buf -> {
-                    buf.writeInt(com.yitianys.BlockZ.config.BlockZConfigs.initialPocketSlots.get());
+                    buf.writeInt(com.yitianys.BlockZ.config.BlockZConfigs.getInitialPocketSlots());
                     buf.writeBoolean(true); // Has Pos
                     buf.writeBlockPos(pos);
+                    CuriosIntegration.writeAdditionalDayZSlotRefs(serverPlayer, buf);
                 });
             }
         }
@@ -654,44 +759,6 @@ public class CommonModEvents {
             currentClass = currentClass.getSuperclass();
         }
         return false;
-    }
-
-    @SubscribeEvent
-    public static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
-        if (event.getLevel().isClientSide) return;
-        
-        Player player = event.getEntity();
-        boolean dayzEnabled = player.getCapability(PlayerBackpackProvider.PLAYER_BACKPACK)
-                .map(PlayerBackpack::isDayzEnabled)
-                .orElse(true);
-
-        if (!dayzEnabled) return;
-
-        Entity target = event.getTarget();
-        if (target instanceof ContainerEntity && target instanceof net.minecraft.world.Container c) {
-            event.setCanceled(true);
-
-            if (player instanceof ServerPlayer serverPlayer) {
-                NetworkHooks.openScreen(serverPlayer, new MenuProvider() {
-                    @Override
-                    public Component getDisplayName() {
-                        return target.getDisplayName();
-                    }
-
-                    @Override
-                    public AbstractContainerMenu createMenu(int id, Inventory inventory, Player player) {
-                        DayZInventoryMenu menu = new DayZInventoryMenu(id, inventory, (BlockPos) null);
-                        menu.activeContainer = c;
-                        return menu;
-                    }
-                }, buf -> {
-                    buf.writeInt(com.yitianys.BlockZ.config.BlockZConfigs.initialPocketSlots.get());
-                    buf.writeBoolean(false); // No BlockPos
-                    buf.writeByte(1); // Type 1: Entity
-                    buf.writeInt(target.getId()); // Entity ID
-                });
-            }
-        }
     }
 
     @SubscribeEvent

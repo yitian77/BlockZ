@@ -65,8 +65,113 @@ public final class DayZZombieConfig {
     public static ForgeConfigSpec.DoubleValue nightAttackDamageMultiplier;
     public static ForgeConfigSpec.DoubleValue nightFollowRangeMultiplier;
 
+    private static boolean isSynced = false;
+    private static boolean s_enableCustomSense;
+    private static boolean s_enableNaturalSpawn;
+    private static double s_crouchDetectionRange;
+    private static double s_walkDetectionRange;
+    private static double s_movingDetectionRange;
+    private static double s_sprintDetectionRange;
+    private static double s_closeDetectionRange;
+    private static double s_targetSearchVerticalRange;
+    private static int s_targetScanInterval;
+    private static int s_targetScanRandomDelay;
+    private static int s_targetMemoryTicks;
+    private static int s_alertInterval;
+    private static double s_alertRangeHorizontal;
+    private static double s_alertRangeVertical;
+    private static double s_trackingExtraRange;
+    private static double s_trackingMemoryExtraRange;
+    private static double s_maxHealth;
+    private static double s_movementSpeed;
+    private static double s_attackDamage;
+    private static double s_followRange;
+    private static double s_armor;
+    private static double s_knockbackResistance;
+    private static double s_attackBleedingChance;
+    private static int s_corpseStayDuration;
+    private static boolean s_enableNightBoost;
+    private static double s_nightMovementSpeedMultiplier;
+    private static double s_nightAttackDamageMultiplier;
+    private static double s_nightFollowRangeMultiplier;
+
     private DayZZombieConfig() {
     }
+
+    public static void setSyncedValues(
+            boolean enableCustomSense, boolean enableNaturalSpawn,
+            double crouchDetectionRange, double walkDetectionRange, double movingDetectionRange, double sprintDetectionRange,
+            double closeDetectionRange, double targetSearchVerticalRange,
+            int targetScanInterval, int targetScanRandomDelay, int targetMemoryTicks, int alertInterval,
+            double alertRangeHorizontal, double alertRangeVertical, double trackingExtraRange, double trackingMemoryExtraRange,
+            double maxHealth, double movementSpeed, double attackDamage, double followRange,
+            double armor, double knockbackResistance, double attackBleedingChance,
+            int corpseStayDuration, boolean enableNightBoost,
+            double nightMovementSpeedMultiplier, double nightAttackDamageMultiplier, double nightFollowRangeMultiplier
+    ) {
+        s_enableCustomSense = enableCustomSense;
+        s_enableNaturalSpawn = enableNaturalSpawn;
+        s_crouchDetectionRange = crouchDetectionRange;
+        s_walkDetectionRange = walkDetectionRange;
+        s_movingDetectionRange = movingDetectionRange;
+        s_sprintDetectionRange = sprintDetectionRange;
+        s_closeDetectionRange = closeDetectionRange;
+        s_targetSearchVerticalRange = targetSearchVerticalRange;
+        s_targetScanInterval = targetScanInterval;
+        s_targetScanRandomDelay = targetScanRandomDelay;
+        s_targetMemoryTicks = targetMemoryTicks;
+        s_alertInterval = alertInterval;
+        s_alertRangeHorizontal = alertRangeHorizontal;
+        s_alertRangeVertical = alertRangeVertical;
+        s_trackingExtraRange = trackingExtraRange;
+        s_trackingMemoryExtraRange = trackingMemoryExtraRange;
+        s_maxHealth = maxHealth;
+        s_movementSpeed = movementSpeed;
+        s_attackDamage = attackDamage;
+        s_followRange = followRange;
+        s_armor = armor;
+        s_knockbackResistance = knockbackResistance;
+        s_attackBleedingChance = attackBleedingChance;
+        s_corpseStayDuration = corpseStayDuration;
+        s_enableNightBoost = enableNightBoost;
+        s_nightMovementSpeedMultiplier = nightMovementSpeedMultiplier;
+        s_nightAttackDamageMultiplier = nightAttackDamageMultiplier;
+        s_nightFollowRangeMultiplier = nightFollowRangeMultiplier;
+        isSynced = true;
+    }
+
+    public static void clearSyncedValues() {
+        isSynced = false;
+    }
+
+    public static boolean isCustomSenseEnabled() { return isSynced ? s_enableCustomSense : enableCustomSense.get(); }
+    public static boolean isNaturalSpawnEnabled() { return isSynced ? s_enableNaturalSpawn : enableNaturalSpawn.get(); }
+    public static double getCrouchDetectionRange() { return isSynced ? s_crouchDetectionRange : crouchDetectionRange.get(); }
+    public static double getWalkDetectionRange() { return isSynced ? s_walkDetectionRange : walkDetectionRange.get(); }
+    public static double getMovingDetectionRange() { return isSynced ? s_movingDetectionRange : movingDetectionRange.get(); }
+    public static double getSprintDetectionRange() { return isSynced ? s_sprintDetectionRange : sprintDetectionRange.get(); }
+    public static double getCloseDetectionRange() { return isSynced ? s_closeDetectionRange : closeDetectionRange.get(); }
+    public static double getTargetSearchVerticalRange() { return isSynced ? s_targetSearchVerticalRange : targetSearchVerticalRange.get(); }
+    public static int getTargetScanInterval() { return isSynced ? s_targetScanInterval : targetScanInterval.get(); }
+    public static int getTargetScanRandomDelay() { return isSynced ? s_targetScanRandomDelay : targetScanRandomDelay.get(); }
+    public static int getTargetMemoryTicks() { return isSynced ? s_targetMemoryTicks : targetMemoryTicks.get(); }
+    public static int getAlertInterval() { return isSynced ? s_alertInterval : alertInterval.get(); }
+    public static double getAlertRangeHorizontal() { return isSynced ? s_alertRangeHorizontal : alertRangeHorizontal.get(); }
+    public static double getAlertRangeVertical() { return isSynced ? s_alertRangeVertical : alertRangeVertical.get(); }
+    public static double getTrackingExtraRange() { return isSynced ? s_trackingExtraRange : trackingExtraRange.get(); }
+    public static double getTrackingMemoryExtraRange() { return isSynced ? s_trackingMemoryExtraRange : trackingMemoryExtraRange.get(); }
+    public static double getMaxHealth() { return isSynced ? s_maxHealth : maxHealth.get(); }
+    public static double getMovementSpeed() { return isSynced ? s_movementSpeed : movementSpeed.get(); }
+    public static double getAttackDamage() { return isSynced ? s_attackDamage : attackDamage.get(); }
+    public static double getFollowRange() { return isSynced ? s_followRange : followRange.get(); }
+    public static double getArmor() { return isSynced ? s_armor : armor.get(); }
+    public static double getKnockbackResistance() { return isSynced ? s_knockbackResistance : knockbackResistance.get(); }
+    public static double getAttackBleedingChance() { return isSynced ? s_attackBleedingChance : attackBleedingChance.get(); }
+    public static int getCorpseStayDuration() { return isSynced ? s_corpseStayDuration : corpseStayDuration.get(); }
+    public static boolean isNightBoostEnabled() { return isSynced ? s_enableNightBoost : enableNightBoost.get(); }
+    public static double getNightMovementSpeedMultiplier() { return isSynced ? s_nightMovementSpeedMultiplier : nightMovementSpeedMultiplier.get(); }
+    public static double getNightAttackDamageMultiplier() { return isSynced ? s_nightAttackDamageMultiplier : nightAttackDamageMultiplier.get(); }
+    public static double getNightFollowRangeMultiplier() { return isSynced ? s_nightFollowRangeMultiplier : nightFollowRangeMultiplier.get(); }
 
     public static void register() {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
