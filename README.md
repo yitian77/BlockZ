@@ -185,4 +185,4 @@ BlockZ 的衣物不仅仅是装饰，它们也能提供少量的存储空间（�
 ---
 *注：本模组目前处于 Alpha 开发阶段。*
 ## 💰  赞助作者
-![求赞助](https://afdian.com/a/yitianys)
+https://afdian.com/a/yitianys
