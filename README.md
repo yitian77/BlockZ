@@ -1,4 +1,4 @@
-<img src="src/main/resources/BlockZ_logo.png" alt="BlockZ Logo" width="240">
+<img src="src/main/resources/BlockZ_logo.png" alt="BlockZ Logo" width="420">
 
 [简体中文](README.md) | [English](README_en_us.md)
 
