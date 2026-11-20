@@ -1,188 +1,43 @@
-# BlockZ
+<img src="src/main/resources/BlockZ_logo.png" alt="BlockZ Logo" width="420">
 
-一个旨在为 Minecraft 1.20.1 带来硬核生存体验的模组，深度致敬 DayZ 与 DayM。
+![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A?style=flat-square)
+![Forge](https://img.shields.io/badge/Forge-47.x-orange?style=flat-square)
+![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-1.1.6--Beta--fix-lightgrey?style=flat-square)
 
-**当前版本**: 1.1.5-Alpha
+BlockZ 是一个面向 Minecraft 1.20.1（Forge）的硬核末日生存模组，灵感来自 DayZ 与 DayM。它以 DayZ 风格库存、占格物品、医疗状态、战术姿态与联机同步为核心，重建更慢、更压抑的生存节奏。
 
-## 🌟 核心功能
+从网格背包、尸体搜刮，到体温、口渴、疾病、流血、骨折与负重，每一次外出都是一次风险评估。安装、配置、命令与兼容说明请见 Wiki。
 
-### 1. 全新的 DayZ 风格 GUI
-- **三面板布局**：左侧为“附近物品 (VICINITY)”，中间为“玩家状态 (PLAYER)”，右侧为“物品栏 (INVENTORY)”。
-- **附近物品系统**：实时检测玩家周围 2.0 格范围内的掉落物，支持直接点击拾取或拖拽丢弃。
-- **拖拽丢弃**：将物品拖拽到 Vicinity 区域即可直接丢弃到世界中。
-- **界面切换**：支持通过命令 `/blockz_toggle_ui <true|false>` 在 DayZ 风格界面与原版界面之间切换（需要 OP/管理员权限）。
+## 文档与社区
 
-### 2. 动态背包与锁定系统
-- **独立容器**：背包不再是简单的格子扩展，每个背包物品都有独立的 NBT 储存空间。
-- **动态容量**：背包/背心/衣物口袋使用矩形容量（`cap_width`/`cap_height`）定义可用空间，并驱动界面列数与宽度自适应。
-- **原版背包锁定**：
-  - 在关闭 DayZ UI (使用原版界面) 时，非管理员玩家的背包空间将被限制为基础 5 格。
-  - **可配置开关**：此功能可以通过配置文件 `blockz-common.toml` 中的 `ui.enable_vanilla_lock` 开启或关闭（默认开启）。
-  - 只有穿戴了特定的含口袋装备（如战术背心、口袋衣物）才能解锁额外空间。
-  - 未解锁的区域将显示红色的“锁定”图标，且无法放入物品。
-  - 锁定机制通过底层 Mixin 强力实现，防止任何绕过手段。
+* [Wiki 文档站](https://yitian77.github.io/)
 
-### 3. 尸体系统
-- **遗体实体**：玩家死亡后会生成可交互的尸体实体，用于存放/拾取掉落物。
-- **可配置消失时间**：尸体会在一定时间后自动消失（可在配置中调整）。
+<a href="https://discord.gg/3GktAbyfYt"><img src="src/main/resources/assets/blockz/textures/gui/mainmenu/poster_0.png" alt="BlockZ Discord 服务器" width="320"></a>
 
-### 4. DayZ 风格 HUD
-- **状态图标**：生命值、饥饿值、饮水度（开发中）与护甲值。
-- **填充式显示**：图标会随着数值的变化而上下填充，直观反馈玩家状态。
-- **极简设计**：在非聊天界面下自动优化显示效果，保持屏幕整洁。
-- **伤害状态图标**：支持显示流血、骨折、止痛等状态图标，并在护理物品使用时显示进度条。
-- **可配置开关**：可通过配置文件 `blockz-common.toml` 的 `ui.show_dayz_hud` 开启或关闭。
+[加入 BlockZ Discord 社区](https://discord.gg/3GktAbyfYt)
 
-### 5. 性能优化
-- **智能扫描**：Vicinity 检测采用每 0.5 秒一次的智能扫描，显著降低大量掉落物时的 CPU 开销。
-- **渲染优化**：合并渲染状态切换，保证在各种配置下都能维持稳定的帧数。
+## 贡献
 
-### 6. 护理系统（流血 / 骨折 / 止痛）
-- **流血效果**：受到攻击时有概率触发流血（可配置概率）。
-- **骨折效果**：高处摔落时有概率触发骨折（可配置倍率与上限）。
-- **护理物品**：绷带/碎布用于止血；夹板用于骨折固定与恢复；吗啡/可待因为止痛类药物。
-- **可配置开关**：可分别在 `blockz-common.toml` 中开启/关闭护理系统、流血、骨折。
+欢迎提交 Issue 与 Pull Request。
 
-## 📖 使用教程
+* 使用 Java 17 与 Forge 1.20.1 官方映射，遵循现有分包与命名。
+* `if` 语句使用花括号，常量使用全大写下划线命名，适当添加 `@Override`。
+* 修改配置时同步 Cloth Config 界面与 `zh_cn.json` / `en_us.json`。
+* 修改网络包字段时同步客户端与服务端，并提升 `NetworkHandler.PROTOCOL`。
+* 保持类的职责单一，不提交无关的构建产物、日志或临时文件。
 
-### 1. 基础操作
-- **打开背包**：按 `E` 键打开 DayZ 风格背包（默认）。
-- **切换界面**：如果不习惯 DayZ 风格，可以输入命令 `/blockz_toggle_ui <true|false>` 切换（需要 OP/管理员权限）。
-- **拾取物品**：
-  - **Vicinity 面板**（左侧）：显示周围地上的物品，点击即可捡起。
-  - **拖拽**：将物品从 Vicinity 拖到背包中，或从背包拖到 Vicinity 丢弃。
+## 许可
 
-### 2. 背包扩容指南
-本模组采用了硬核的背包容量限制：
-- **初始状态**：你只有 **可配置的基础口袋槽位**（默认 5 格，对应原版快捷栏上方的一小行，可在配置文件中修改）。
-- **如何扩容**：
-  - 寻找并装备 **背包 (Backpack)**：提供大量存储空间。
-  - 寻找并装备 **战术背心 (Vest)**：提供中等存储空间。
-  - 穿戴 **口袋衣物**：部分衣物提供少量额外槽位。
-- **锁定机制**：未解锁的槽位会被红色锁定图标覆盖，无法使用。即使切换回原版 UI，这些限制依然存在（除非在配置中关闭）。
+BlockZ 使用 **GNU General Public License v3.0**，详见 [LICENSE](LICENSE)。允许在整合包、视频与直播中使用并注明出处；修改或二次分发需继续使用 GPL-3.0。
 
-### 3. 配置说明
-配置文件位于 `.minecraft/config/blockz-common.toml`：
-```toml
-[ui]
-    # UI 缩放比例 (0.5 - 2.0)
-    "ui.scale" = 1.0
-    # 允许玩家使用命令切换 UI 风格
-    "ui.allow_player_toggle" = true
-    # 是否显示 DayZ UI 切换提示
-    "ui.show_dayz_toggle_hint" = true
-    # 是否显示 DayZ HUD 覆盖层
-    "ui.show_dayz_hud" = true
-    # 是否启用护理系统（伤口/骨折/绷带等）
-    "ui.enable_nursing_system" = true
-    # 是否启用流血效果
-    "ui.enable_bleeding" = true
-    # 是否启用骨折效果
-    "ui.enable_broken_legs" = true
-    # 基础流血概率（与伤害值相乘）
-    "ui.base_bleeding_chance" = 0.1
-    # 骨折概率倍率（fallDistance/maxFallDistance * multiplier）
-    "ui.broken_leg_chance_multiplier" = 0.35
-    # 骨折概率上限
-    "ui.broken_leg_max_chance" = 0.85
-    # 启用原版背包锁定机制 (关闭后原版界面将不再限制槽位)
-    "ui.enable_vanilla_lock" = true
-    # 初始口袋格子数 (无背包时)
-    "ui.initial_pocket_slots" = 5
-```
+## 鸣谢
 
-### 4. 常见问题
-- **Q: 为什么我的背包只有一排格子能用？**
-  - A: 这是模组的设定。你需要寻找背包或背心来解锁更多空间。
-- **Q: 锁定图标变紫了/没贴图？**
-  - A: 请检查资源包加载情况，确保 mod 版本正确。
+GeckoLib、Minecraft Forge、Curios API、TACZ、Thirst Was Taken、Cloth Config、JEI、DayZ / DayM，以及所有参与测试、反馈与赞助的玩家。
 
-### 5. 自定义与其他模组兼容
-本模组支持通过配置文件为其他模组的物品定义 **网格尺寸** 和 **背包容量**。
+## 赞助
 
-1. **配置文件位置**：
-   `.minecraft/config/blockz/grid_items.json`
+<a href="https://ifdian.net/a/yitianys"><img src="src/main/resources/assets/blockz/textures/gui/mainmenu/poster_2.png" alt="爱发电：支持我的创作" width="420"></a>
 
-2. **配置格式**：
-   在 `items` 对象中添加键值对。键为物品 ID (如 `minecraft:diamond_sword`)，值为配置对象。
+[支持我的创作，让热爱持续发电](https://ifdian.net/a/yitianys)
 
-   | 字段 | 类型 | 说明 |
-   | :--- | :--- | :--- |
-   | `width` | 整数 | 物品在 DayZ 物品栏中占用的宽度 (1-20) |
-   | `height` | 整数 | 物品在 DayZ 物品栏中占用的高度 (1-20) |
-   | `cap_width` | 整数 | (可选) 如果该物品是背包/衣物，容量网格宽度 |
-   | `cap_height` | 整数 | (可选) 如果该物品是背包/衣物，容量网格高度 |
-   | `grid_color` | 整数/字符串 | (可选) 自定义该物品占格背景色，支持 `0xAARRGGBB` 或 `#RRGGBB/#AARRGGBB` |
-
-3. **示例**：
-   假设你想兼容 "Another Mod" 的 "Big Bag"，让它占 3x3 格子并且是黄色的背景板，并提供一个 6x5 的容量网格（总容量 30）：
-   ```json
-   {
-     "items": {
-       "another_mod:big_bag": {
-         "width": 3,
-         "height": 3,
-         "cap_width": 6,
-         "cap_height": 5,
-         "grid_color": "#FFD700"
-       },
-       "another_mod:long_sword": {
-         "width": 1,
-         "height": 4
-       }
-     }
-   }
-   ```
-    *修改配置文件后，使用命令 `/blockz_reload` 让服务端重载并同步到客户端（需要 OP/管理员权限）。*
-
-### 6. 管理员命令
-- `/blockz_toggle_ui <true|false> [target]`：切换指定玩家是否使用 DayZ UI。
-- `/blockz_reload`：重载 `grid_items.json` 并同步客户端。
-- `/blockz_grid_item <width> <height> [color]`：修改主手物品的占格大小与可选背景色（不填颜色则回退默认颜色），写入 `grid_items.json` 并同步客户端。
-- `/blockz_clothing_capacity <width> <height>`：仅限主手衣物，修改衣物/背包容量网格 `cap_width/cap_height`，写入 `grid_items.json` 并同步客户端。
-- `/blockz_clear_corpse [targets]`：清理尸体实体。
-
-### 7. 物品指南
-#### 背包与扩容装备
-以下装备可以为你提供额外的背包槽位（具体数值可在配置中修改）：
-
-| 物品名称 | 默认提供槽位 | 说明 |
-| :--- | :---: | :--- |
-| **Coyote Backpack (土狼背包)** | 24 | 大容量军用背包 |
-| **Alice Backpack (爱丽丝背包)** | 20 | 经典军用背包 |
-| **Czech Backpack (捷克背包)** | 16 | 中型背包 |
-| **Patrol Pack (巡逻包)** | 8 | 轻便型背包 |
-| **Czech Pouch (捷克挂包)** | 6 | 小型挂包 |
-| **Vest (战术背心)** | 12 | 装备在背心槽，可与背包叠加 |
-
-#### 衣物系统
-BlockZ 的衣物不仅仅是装饰，它们也能提供少量的存储空间（口袋）：
-- **Shirt (上衣)**：默认提供 **6** 个槽位。
-- **Pants (裤子)**：默认提供 **4** 个槽位。
-- **提示**：即使没有背包，穿上一套好衣服也能让你多带几组弹药或绷带。
-
-### 8. 联动模组说明
-本模组设计用于与以下类型的模组协同工作以获得最佳体验：
-- **枪械模组** (如 Vic's Point Blank, TaC): DayZ 风格界面非常适合现代战争生存。
-- **⚠ 真实生存模组推荐**：强烈推荐搭配 **Thirst Was Taken** 使用！本模组已针对其饮水系统进行了深度适配，能带来最完整的生存体验。
-- **JEI (Just Enough Items)**: 强烈建议安装，以便查看合成配方（虽然本模组物品多为搜刮获得）。
-- **Curios API**: 已兼容。支持将背包/背心/面罩等作为 Curios 槽位装备，并与 BlockZ 的背包装备 Capability 双向同步（登录/重生导入，背包槽位变更同步回 Curios）。
-
-## 🛠️ 技术架构 (Forge 1.20.1)
-- **Capability 系统**：使用 Forge Capability 持久化存储玩家的背包装备状态。
-- **网络通信**：自定义 S2C 数据包确保客户端与服务器之间的背包状态实时同步。
-- **自定义菜单系统**：深度定制 `AbstractContainerMenu` 以实现复杂的槽位交互逻辑。
-- **Mixin 注入**：修改底层 `Slot` 逻辑以实现严格的物品锁定。
-
-## 📂 项目结构
-- `com.yitianys.BlockZ.menu`: 核心物品栏逻辑
-- `com.yitianys.BlockZ.client.gui`: 自定义界面渲染
-- `com.yitianys.BlockZ.client.hud`: HUD 覆盖层实现
-- `com.yitianys.BlockZ.capability`: 玩家属性扩展
-- `com.yitianys.BlockZ.network`: 网络通信包
-- `com.yitianys.BlockZ.mixin`: 底层逻辑修改
-
----
-*注：本模组目前处于 Alpha 开发阶段。*
-## 💰  赞助作者
-https://afdian.com/a/yitianys
