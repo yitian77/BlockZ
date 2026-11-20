@@ -1,4 +1,6 @@
-<img src="src/main/resources/BlockZ_logo.png" alt="BlockZ Logo" width="420">
+<img src="src/main/resources/BlockZ_logo.png" alt="BlockZ Logo" width="240">
+
+[简体中文](README.md) | [English](README_en_us.md)
 
 ![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A?style=flat-square)
 ![Forge](https://img.shields.io/badge/Forge-47.x-orange?style=flat-square)
